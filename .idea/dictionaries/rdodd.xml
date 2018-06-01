@@ -3,8 +3,10 @@
     <words>
       <w>alpm</w>
       <w>libalpm</w>
+      <w>memoizing</w>
       <w>pacman</w>
       <w>reqwest</w>
+      <w>syncdb</w>
     </words>
   </dictionary>
 </component>

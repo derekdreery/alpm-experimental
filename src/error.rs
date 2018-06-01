@@ -2,6 +2,8 @@ use failure::{Fail, Context, Backtrace};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use db::DbName;
+
 #[derive(Debug)]
 pub struct Error {
     inner: Context<ErrorKind>
@@ -9,30 +11,42 @@ pub struct Error {
 
 #[derive(Debug, Clone, Fail, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum ErrorKind {
-    /// Indicates a general error creating lockfile, for example due to permissions.
-    #[fail(display = "Cannot create the lockfile at {:?}", _0)]
+    /// Indicates that the specified root directory is not valid, either because it is
+    /// inaccessible, or because it is not a directory.
+    #[fail(display = "The root path \"{:?}\" does not point to a valid directory on the system.", _0)]
     // this would be better displayed using Path::display, but can't do this in procedural macro.
+    BadRootPath(PathBuf),
+    /// Indicates that the specified database directory is not valid, either because it is
+    /// inaccessible, or because it is not a directory.
+    #[fail(display = "The database path \"{:?}\" does not point to a valid directory on the system.", _0)]
+    BadDatabasePath(PathBuf),
+    /// Indicates that the specified sync database directory is not valid, either because it is
+    /// inaccessible, or because it is not a directory.
+    #[fail(display = "The sync database path \"{:?}\" does not point to a valid directory on the system.", _0)]
+    BadSyncDatabasePath(PathBuf),
+    /// Indicates a general error creating lockfile, for example due to permissions.
+    #[fail(display = "Cannot create the lockfile at \"{:?}\"", _0)]
     CannotAcquireLock(PathBuf),
     /// Indicates there was a lockfile already present.
     ///
     /// This can also happen if the library crashed, in which case it is safe to remove the file.
-    #[fail(display = "Lockfile at {:?} already exists - you may delete it if you are certain no other instance is running", _0)]
+    #[fail(display = "Lockfile at \"{:?}\" already exists - you may delete it if you are certain no other instance is running", _0)]
     LockAlreadyExists(PathBuf),
     /// Indicates that a lock cannot be released
-    #[fail(display = "Cannot release (remove) the lockfile at {:?}", _0)]
+    #[fail(display = "Cannot release (remove) the lockfile at \"{:?}\"", _0)]
     CannotReleaseLock(PathBuf),
+    /// A given database name is invalid.
+    #[fail(display = "Cannot use \"{}\" as a database name - it is not a valid directory name", _0)]
+    InvalidDatabaseName(String),
+    /// A given database name already exists.
+    #[fail(display = "Database with name \"{}\" already exists", _0)]
+    DatabaseAlreadyExists(DbName),
+    /// There was an unexpected error when creating a database.
+    #[fail(display = "Could not create database \"{}\" on the filesystem.", _0)]
+    CannotCreateDatabase(DbName),
 }
 
 impl ErrorKind {
-    /// Helper constructor for `CannotAcquireLock` variant
-    pub fn cannot_acquire_lock(path: impl AsRef<Path>) -> ErrorKind {
-        ErrorKind::CannotAcquireLock(path.as_ref().to_owned())
-    }
-
-    /// Helper constructor for `CannotReleaseLock` variant
-    pub fn cannot_release_lock(path: impl AsRef<Path>) -> ErrorKind {
-        ErrorKind::CannotReleaseLock(path.as_ref().to_owned())
-    }
 }
 
 impl Fail for Error {

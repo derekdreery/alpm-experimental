@@ -1,42 +1,68 @@
+#[macro_use]
+extern crate bitflags;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
-extern crate fs2;
+//extern crate fs2;
+extern crate lockfile;
 #[macro_use]
 extern crate log;
 extern crate reqwest;
+extern crate serde;
 extern crate tempfile;
 
 
 mod error;
 mod util;
+mod alpm_desc;
+
+pub mod db;
 
 pub use error::{Error, ErrorKind};
 
+use db::{Db, DbBase, DbName, SignatureLevel};
+use util::check_valid_directory;
+
 use failure::{Fail, ResultExt};
-use fs2::{lock_contended_error, FileExt};
-use std::fs::{OpenOptions, File, create_dir_all, remove_file};
-use std::mem::ManuallyDrop;
+use lockfile::Lockfile;
+
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The name of the lockfile (hard-coded)
+/// The name of the lockfile (hard-coded).
 pub const LOCKFILE: &str = "db.lck";
+/// The name of the local database.
+pub const LOCAL_DB_NAME: &str = "local";
+/// The name of the directory for sync databases.
+pub const SYNC_DB_DIR: &str = "sync";
+/// The extension of the directory for sync databases.
+pub const SYNC_DB_EXT: &str = "db";
 
 /// Handle to an alpm instance. Uses a lockfile to prevent concurrent access to the
 /// same db.
 pub struct Alpm {
+    /// The local package database
+    ///
+    /// This is only an option for initialization, once the struct
+    /// is made it will always be `Some`.
+    local_database: DbBase,
+    /// A list of all sync databases
+    sync_databases: Vec<DbBase>,
     /// Managed filesystem root (normally this will be "/")
     root_path: PathBuf,
     /// The path of the alpm package database
     database_path: PathBuf,
-    /// The path of the lockfile, preventing multiple processes
+    /// The lockfile, preventing multiple processes
     /// interacting with the database concurrently.
-    lockfile_path: PathBuf,
+    lockfile: Lockfile,
     /// Path to the directory where gpg files are stored
     gpg_path: PathBuf,
-    /// A handle on the lockfile. When this goes out of scope the file is unlocked.
-    lockfile_handle: ManuallyDrop<File>,
+    /// List of paths to the cache directories
+    cache_dirs_paths: Vec<PathBuf>,
+    /// List of paths to the hook directories
+    hook_dirs_paths: Vec<PathBuf>,
+    /// List of paths that may be overwritten
+    overwrite_file_paths: Vec<PathBuf>,
     /// Cached reqwest client, for speed
     http_client: reqwest::Client,
 }
@@ -62,6 +88,27 @@ impl Alpm {
     pub fn new() -> AlpmBuilder {
         Default::default()
     }
+
+    /// Register a new sync database
+    ///
+    /// The name must not match `LOCAL_DB_NAME`.
+    pub fn register_sync_database<'a>(&'a mut self, name: impl AsRef<str>)
+        -> Result<Db<'a>, Error>
+    {
+        let base = DbBase::new_sync(name, self, SignatureLevel::default())?;
+        let db_idx = self.sync_databases.len();
+        self.sync_databases.push(base);
+        Ok(Db::new(&self.sync_databases[db_idx], self))
+    }
+
+    /// Are there any databases already registered with the given name
+    pub fn database_exists(&self, name: impl AsRef<str>) -> bool {
+        let name = name.as_ref();
+        if name == LOCAL_DB_NAME {
+            return true;
+        }
+        self.sync_databases.iter().any(|db| db.name() == name)
+    }
 }
 
 /// Builder-pattern constructor for the Alpm struct.
@@ -70,8 +117,11 @@ impl Alpm {
 ///
 /// See `Alpm` struct for field documentation.
 pub struct AlpmBuilder {
+    /// Root path for filesystem. Defaults to "/" on non-windows, "C:\" on windows.
     root_path: Option<PathBuf>,
+    /// Path for the alpm database. Defaults to "$root/var/lib/pacman"
     database_path: Option<PathBuf>,
+    /// todo
     gpg_path: Option<PathBuf>,
 }
 
@@ -86,18 +136,19 @@ impl Default for AlpmBuilder {
 }
 
 impl AlpmBuilder {
-    /// Use custom root path (defaults to "/")
+    /// Use custom root path.
     pub fn with_root_path(mut self, root_path: impl AsRef<Path>) -> Self {
         self.root_path = Some(root_path.as_ref().to_owned());
         self
     }
 
-    /// Use custom database path (defaults to "$root/var/lib/pacman")
+    /// Use custom database path
     pub fn with_database_path(mut self, database_path: impl AsRef<Path>) -> Self {
         self.database_path = Some(database_path.as_ref().to_owned());
         self
     }
 
+    /// Use custom gpg location
     pub fn with_gpg_path(mut self, gpg_path: impl AsRef<Path>) -> Self {
         self.gpg_path = Some(gpg_path.as_ref().to_owned());
         self
@@ -110,94 +161,57 @@ impl AlpmBuilder {
         #[cfg(not(windows))]
         let root_path = self.root_path.unwrap_or("/".into());
         debug!("root path: {}", root_path.display());
+        check_valid_directory(&root_path)
+            .context(ErrorKind::BadRootPath(root_path.clone()))?;
 
         // todo sensible default database path on windows
         let database_path = match self.database_path {
             Some(path) => path,
             None => {
                 let mut db_path = root_path.clone();
-                db_path.push("var");
-                db_path.push("lib");
-                db_path.push("pacman");
+                db_path.push("var/lib/pacman");
                 db_path
             }
         };
         debug!("database path: {}", database_path.display());
+        check_valid_directory(&database_path)
+            .context(ErrorKind::BadDatabasePath(database_path.clone()))?;
+
+        let sync_db_path = database_path.join(SYNC_DB_DIR);
+        debug!("sync database path: {}", sync_db_path.display());
+        check_valid_directory(&sync_db_path)
+            .context(ErrorKind::BadSyncDatabasePath(sync_db_path.clone()))?;
 
         // todo
         let gpg_path = root_path.clone();
+        debug!("gpg path: {}", gpg_path.display());
 
         let lockfile_path = database_path.join(LOCKFILE);
+        debug!("lockfile path: {}", lockfile_path.display());
 
-        let lockfile_handle = create_lockfile(&lockfile_path)?;
-        Ok(Alpm {
+        let lockfile = Lockfile::create(&lockfile_path)
+            .map_err(|e| {
+                let kind = e.kind();
+                if kind == io::ErrorKind::AlreadyExists {
+                    e.context(ErrorKind::LockAlreadyExists(lockfile_path.clone()))
+                } else {
+                    e.context(ErrorKind::CannotAcquireLock(lockfile_path.clone()))
+                }
+            })?;
+
+        let alpm = Alpm {
+            local_database: DbBase::new_no_check_duplicates(DbName::LOCAL.clone(),
+                                                            SignatureLevel::Default),
+            sync_databases: Vec::new(),
             root_path,
             database_path,
-            lockfile_path,
+            lockfile,
             gpg_path,
-            lockfile_handle,
+            cache_dirs_paths: Vec::new(),
+            hook_dirs_paths: Vec::new(),
+            overwrite_file_paths: Vec::new(),
             http_client: reqwest::Client::new(),
-        })
+        };
+        Ok(alpm)
     }
 }
-
-impl Drop for Alpm {
-    fn drop(&mut self) {
-        // discard error (will still be logged)
-        remove_lockfile(self.lockfile_handle.clone(), &self.lockfile_path);
-    }
-}
-
-/// Helper to create a lockfile and return the correct error on failure
-///
-/// # Panics
-///
-/// Will panic if the path doesn't have a parent directory.
-fn create_lockfile(path: impl AsRef<Path>) -> Result<File, Error> {
-    let path = path.as_ref();
-
-    // create parent directory if not exists (match libalpm behaviour)
-    let dir = path.parent().expect("internal error: lockfile path must have a parent");
-    create_dir_all(dir).context(ErrorKind::cannot_acquire_lock(path))?;
-    debug!("lockfile parent directories created/found at {}", dir.display());
-
-    // create lockfile (or get a handle if file already exists)
-    let mut lockfile_opts = OpenOptions::new();
-    lockfile_opts.create(true)
-        .read(true)
-        .write(true);
-    let lockfile = lockfile_opts.open(path)
-        .context(ErrorKind::cannot_acquire_lock(path))?;
-    debug!("lockfile created/found at {}", path.display());
-
-    // lock lockfile
-    match lockfile.try_lock_exclusive() {
-        Ok(_) => (),
-        Err(ref e) if e.kind() == lock_contended_error().kind() => {
-            warn!("Lockfile at {} already present and locked, blocking until released",
-                  path.display());
-            lockfile.lock_exclusive().context(ErrorKind::cannot_acquire_lock(path))?;
-        },
-        Err(e) => Err(e.context(ErrorKind::cannot_acquire_lock(path)))?
-    };
-    debug!("lockfile locked at {}", path.display());
-
-    Ok(lockfile)
-}
-
-/// Helper to remove a lockfile.
-///
-/// Returns an error if this was not possible
-fn remove_lockfile(fd: File, path: impl AsRef<Path>) -> Result<(), Error> {
-    let path = path.as_ref();
-
-    // release lockfile
-    fd.unlock().context(ErrorKind::cannot_release_lock(path))?;
-    debug!("lockfile unlocked at {}", path.display());
-    drop(fd);
-
-    remove_file(path).context(ErrorKind::cannot_release_lock(path))?;
-    debug!("lockfile removed at {}", path.display());
-    Ok(())
-}
-
