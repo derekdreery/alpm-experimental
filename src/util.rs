@@ -1,8 +1,8 @@
-use std::io;
-use std::fmt;
-use std::path::Path;
-use std::fs;
 use std::error;
+use std::fmt;
+use std::fs;
+use std::io;
+use std::path::Path;
 
 #[derive(Debug)]
 pub struct NotADirectory;
@@ -30,12 +30,15 @@ pub fn check_valid_directory(path: &Path) -> io::Result<()> {
             } else {
                 Err(io::Error::new(io::ErrorKind::AlreadyExists, NotADirectory))
             }
-        },
+        }
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
             // try to create and return any error
-            warn!("directory \"{}\" not found - attempting to create", path.display());
+            warn!(
+                "directory \"{}\" not found - attempting to create",
+                path.display()
+            );
             fs::create_dir_all(path)
         }
-        Err(e) => Err(e)
+        Err(e) => Err(e),
     }
 }

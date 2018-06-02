@@ -1,8 +1,8 @@
+use error::ErrorKind;
 use std::cmp;
 use std::fmt;
 use std::path::{self, Path, PathBuf};
 use {Alpm, LOCAL_DB_NAME, SYNC_DB_DIR, SYNC_DB_EXT};
-use error::ErrorKind;
 
 /// A package database.
 pub struct Db<'a> {
@@ -26,12 +26,13 @@ impl<'a> Db<'a> {
         // alpm checks path name, but we do this during construction.
 
         // check if database is missing
-        if ! self.path().is_dir() {
+        if !self.path().is_dir() {
             return DbStatus::Missing;
         }
 
         // check signatures
-        if true { // todo
+        if true {
+            // todo
             DbStatus::Exists { valid: true }
         } else {
             DbStatus::Exists { valid: false }
@@ -50,7 +51,6 @@ pub(crate) struct DbBase {
     sig_level: SignatureLevel,
     /// Which operations this database will be used for.
     usage: DbUsage,
-
 }
 
 impl DbBase {
@@ -58,9 +58,11 @@ impl DbBase {
     ///
     /// Optionally supply a handle to check for duplicates. If this is not possible (because the
     /// alpm instance does not exist yet), check_for_duplicates should be called afterwards.
-    pub(crate) fn new(name: DbName, handle: &Alpm, sig_level: SignatureLevel)
-        -> Result<DbBase, ErrorKind>
-    {
+    pub(crate) fn new(
+        name: DbName,
+        handle: &Alpm,
+        sig_level: SignatureLevel,
+    ) -> Result<DbBase, ErrorKind> {
         if handle.database_exists(&name) {
             return Err(ErrorKind::DatabaseAlreadyExists(name));
         }
@@ -71,14 +73,20 @@ impl DbBase {
     /// Create a new sync db instance
     ///
     /// The name of this database must not match LOCAL_DB_NAME
-    pub(crate) fn new_sync(name: impl AsRef<str>, handle: &Alpm, sig_level: SignatureLevel)
-        -> Result<DbBase, ErrorKind>
-    {
+    pub(crate) fn new_sync(
+        name: impl AsRef<str>,
+        handle: &Alpm,
+        sig_level: SignatureLevel,
+    ) -> Result<DbBase, ErrorKind> {
         let name = name.as_ref();
         if name == LOCAL_DB_NAME {
-            return Err(ErrorKind::DatabaseAlreadyExists(DbName::LOCAL.clone()))
+            return Err(ErrorKind::DatabaseAlreadyExists(DbName::LOCAL.clone()));
         }
-        Self::new(DbName(DbNameInner::Sync(name.to_owned())), handle, sig_level)
+        Self::new(
+            DbName(DbNameInner::Sync(name.to_owned())),
+            handle,
+            sig_level,
+        )
     }
 
     /// Create a new database without checking for duplicates.
@@ -89,7 +97,7 @@ impl DbBase {
         DbBase {
             name,
             sig_level,
-            usage: DbUsage::ALL
+            usage: DbUsage::ALL,
         }
     }
 
@@ -106,7 +114,6 @@ impl DbBase {
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DbName(DbNameInner);
 
-
 impl DbName {
     /// Create a new valid DbName.
     ///
@@ -115,9 +122,8 @@ impl DbName {
         let name = name.as_ref();
         let db_name = match name {
             LOCAL_DB_NAME => DbName(DbNameInner::Local),
-            name if DbName::valid_syncdb_name(name)
-                => DbName(DbNameInner::Sync(name.to_owned())),
-            _ => return Err(ErrorKind::InvalidDatabaseName(name.to_owned()))
+            name if DbName::valid_syncdb_name(name) => DbName(DbNameInner::Sync(name.to_owned())),
+            _ => return Err(ErrorKind::InvalidDatabaseName(name.to_owned())),
         };
         debug_assert!(db_name.is_valid());
         Ok(db_name)
@@ -128,7 +134,7 @@ impl DbName {
     pub fn as_str(&self) -> &str {
         match &self.0 {
             &DbNameInner::Local => LOCAL_DB_NAME,
-            &DbNameInner::Sync(ref name) => name
+            &DbNameInner::Sync(ref name) => name,
         }
     }
 
@@ -153,7 +159,7 @@ impl DbName {
     /// Is is a sync database?
     #[inline]
     pub fn is_sync(&self) -> bool {
-        ! self.is_local()
+        !self.is_local()
     }
 
     /// Get the path for this database name
@@ -165,15 +171,13 @@ impl DbName {
         //  - `$db_path SEP $name` for local
         //  - `$db_path SEP "sync" SEP $name "." $ext` for sync
         match &self.0 {
-            &DbNameInner::Local => {
-                database_path.join(LOCAL_DB_NAME)
-            },
+            &DbNameInner::Local => database_path.join(LOCAL_DB_NAME),
             &DbNameInner::Sync(ref name) => {
                 let mut path = database_path.join(SYNC_DB_DIR);
                 path.push(name);
                 path.set_extension(SYNC_DB_EXT);
                 path
-            },
+            }
         }
     }
 
@@ -196,7 +200,7 @@ impl DbName {
         match &self.0 {
             &DbNameInner::Local => true,
             &DbNameInner::Sync(ref name) => {
-                ! (name == LOCAL_DB_NAME) && DbName::valid_syncdb_name(name)
+                !(name == LOCAL_DB_NAME) && DbName::valid_syncdb_name(name)
             }
         }
     }
@@ -233,7 +237,6 @@ impl cmp::PartialEq<str> for DbName {
     fn ne(&self, rhs: &str) -> bool {
         cmp::PartialEq::ne(self.as_ref(), rhs)
     }
-
 }
 
 impl cmp::PartialEq<DbName> for str {
@@ -250,7 +253,7 @@ pub(crate) enum DbNameInner {
     /// The (unique) local database.
     Local,
     /// One of the sync databases.
-    Sync(String)
+    Sync(String),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -311,8 +314,10 @@ mod tests {
 
     #[test]
     fn db_name() {
-        assert_eq!(DbName::new("name_of_db").unwrap(),
-                   DbName(DbNameInner::Sync("name_of_db".into())));
+        assert_eq!(
+            DbName::new("name_of_db").unwrap(),
+            DbName(DbNameInner::Sync("name_of_db".into()))
+        );
         assert_eq!(&DbName::new("local").unwrap(), DbName::LOCAL);
         assert!(DbName::new("bad/name").is_err());
         #[cfg(windows)]

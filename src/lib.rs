@@ -1,20 +1,25 @@
 #[macro_use]
 extern crate bitflags;
+#[macro_use]
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
 //extern crate fs2;
+extern crate itertools;
 extern crate lockfile;
 #[macro_use]
 extern crate log;
+#[macro_use] // pollute away :(
+extern crate nom;
 extern crate reqwest;
 extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 extern crate tempfile;
 
-
+pub mod alpm_desc;
 mod error;
 mod util;
-mod alpm_desc;
 
 pub mod db;
 
@@ -92,9 +97,10 @@ impl Alpm {
     /// Register a new sync database
     ///
     /// The name must not match `LOCAL_DB_NAME`.
-    pub fn register_sync_database<'a>(&'a mut self, name: impl AsRef<str>)
-        -> Result<Db<'a>, Error>
-    {
+    pub fn register_sync_database<'a>(
+        &'a mut self,
+        name: impl AsRef<str>,
+    ) -> Result<Db<'a>, Error> {
         let base = DbBase::new_sync(name, self, SignatureLevel::default())?;
         let db_idx = self.sync_databases.len();
         self.sync_databases.push(base);
@@ -161,8 +167,7 @@ impl AlpmBuilder {
         #[cfg(not(windows))]
         let root_path = self.root_path.unwrap_or("/".into());
         debug!("root path: {}", root_path.display());
-        check_valid_directory(&root_path)
-            .context(ErrorKind::BadRootPath(root_path.clone()))?;
+        check_valid_directory(&root_path).context(ErrorKind::BadRootPath(root_path.clone()))?;
 
         // todo sensible default database path on windows
         let database_path = match self.database_path {
@@ -189,19 +194,20 @@ impl AlpmBuilder {
         let lockfile_path = database_path.join(LOCKFILE);
         debug!("lockfile path: {}", lockfile_path.display());
 
-        let lockfile = Lockfile::create(&lockfile_path)
-            .map_err(|e| {
-                let kind = e.kind();
-                if kind == io::ErrorKind::AlreadyExists {
-                    e.context(ErrorKind::LockAlreadyExists(lockfile_path.clone()))
-                } else {
-                    e.context(ErrorKind::CannotAcquireLock(lockfile_path.clone()))
-                }
-            })?;
+        let lockfile = Lockfile::create(&lockfile_path).map_err(|e| {
+            let kind = e.kind();
+            if kind == io::ErrorKind::AlreadyExists {
+                e.context(ErrorKind::LockAlreadyExists(lockfile_path.clone()))
+            } else {
+                e.context(ErrorKind::CannotAcquireLock(lockfile_path.clone()))
+            }
+        })?;
 
         let alpm = Alpm {
-            local_database: DbBase::new_no_check_duplicates(DbName::LOCAL.clone(),
-                                                            SignatureLevel::Default),
+            local_database: DbBase::new_no_check_duplicates(
+                DbName::LOCAL.clone(),
+                SignatureLevel::Default,
+            ),
             sync_databases: Vec::new(),
             root_path,
             database_path,
