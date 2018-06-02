@@ -1,7 +1,7 @@
 //! Serde deserializer for alpm desc format
 //!
 //! format is
-//! ```
+//! ```text
 //! %name%
 //! value
 //!
@@ -14,7 +14,7 @@
 pub use super::de_error::{Error, ErrorKind, Result};
 
 use itertools::Itertools;
-use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, Visitor};
+use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
 use std::fmt;
 use std::str::FromStr;
@@ -409,6 +409,24 @@ pub struct DeserializerInner<'de> {
     line_ending: &'static str,
 }
 
+impl<'de> DeserializerInner<'de> {
+    /// Returns the next element in a sequence
+    fn parse_seq_element(&mut self) -> &'de str {
+        match self.input.find(self.line_ending) {
+            Some(newline_pos) => {
+                let value = &self.input[..newline_pos];
+                self.input = &self.input[newline_pos + self.line_ending.len()..];
+                value
+            },
+            None => {
+                let value = &self.input[..];
+                self.input = &self.input[self.input.len()..];
+                value
+            }
+        }
+    }
+}
+
 impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
     type Error = Error;
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
@@ -576,12 +594,12 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
         visitor.visit_newtype_struct(self)
     }
 
-    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_seq<V>(mut self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         if self.allow_list {
-            unimplemented!()
+            visitor.visit_seq(AlpmSeq::new(&mut self))
         } else {
             Err(ErrorKind::Unsupported.into())
         }
@@ -591,11 +609,7 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
     where
         V: Visitor<'de>,
     {
-        if self.allow_list {
-            unimplemented!()
-        } else {
-            Err(ErrorKind::Unsupported.into())
-        }
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_tuple_struct<V>(
@@ -607,11 +621,7 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
     where
         V: Visitor<'de>,
     {
-        if self.allow_list {
-            unimplemented!()
-        } else {
-            Err(ErrorKind::Unsupported.into())
-        }
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_map<V>(mut self, visitor: V) -> Result<V::Value>
@@ -662,237 +672,7 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
         self.deserialize_any(visitor)
     }
 }
-/*
-impl<'de> DeserializerValueOrList<'de> {
 
-/// Check and consume the next newline, and the one after if we're not in a list
-///
-/// If we get to eof before reading all the newlines, then just return an empty str.
-fn check_next_newline(&self, input: &str) -> Result<&str> {
-    let line_str = if self.win_line_endings {
-        if self.allow_list {
-            NEWLINE_CRLF
-        } else {
-            concat!(NEWLINE_CRLF, NEWLINE_CRLF)
-        }
-    } else {
-        if self.allow_list {
-            NEWLINE_LF
-        } else {
-            concat!(NEWLINE_LF, NEWLINE_LF)
-        }
-    };
-    // we check each character is what we expect, but we allow it to be missing (if we got to
-    // the end of the input)
-    for (expected, actual) in line_str.chars().zip(self.input.chars()) {
-        if expected != actual {
-            return Err(ErrorKind::UnexpectedInput.into());
-        }
-    }
-    let len = ::std::cmp::min(self.input.len(), line_str.len());
-    Ok(&input[len..])
-}
-
-#[inline]
-fn newline(&self) -> &'static str {
-    if self.win_line_endings {
-        NEWLINE_CRLF
-    } else {
-        NEWLINE_LF
-    }
-}
-
-/// Returns all the input up to the next newline
-///
-/// Returns `(<current line without newline>, Some(<everything after the newline>))` if a
-/// newline str was found, `(<everything>, None)` otherwise.
-fn split_next_newline(&self) -> (&str, Option<&str>) {
-    let newline = self.newline();
-    match self.input.find(newline) {
-        Some(newline_pos) =>
-            (&self.input[.. newline_pos], Some(&self.input[newline_pos + newline.len() ..]))
-        None => (&self.input, None)
-    }
-}
-}
-*/
-/*
-impl<'de> de::Deserializer<'de> for DeserializerValueOrList<'de> {
-    type Error = Error;
-
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        // we need to know the types to deserialize
-        Err(ErrorKind::Unsupported.into())
-    }
-
-    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        let (val, input) = if input.starts_with("true") {
-            (true, &self.input["true".len()..])
-        } else if input.starts_with("false") {
-            (false, &self.input["false".len()..])
-        } else {
-            return Err(ErrorKind::UnexpectedInput.into())
-        };
-        let input = self.check_next_newline(input)?;
-        self.input = input;
-        visitor.visit_bool(val)
-    }
-
-    fn deserialize_u8<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_u8(self.parse_unsigned()?)
-    }
-
-    fn deserialize_u16<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_u16(self.parse_unsigned()?)
-    }
-
-    fn deserialize_u32<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_u32(self.parse_unsigned()?)
-    }
-
-    fn deserialize_u64<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_u64(self.parse_unsigned()?)
-    }
-
-    fn deserialize_i8<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_i8(self.parse_signed()?)
-    }
-
-    fn deserialize_i16<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_i16(self.parse_signed()?)
-    }
-
-    fn deserialize_i32<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_i32(self.parse_signed()?)
-    }
-
-    fn deserialize_i64<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_i64(self.parse_signed()?)
-    }
-
-    fn deserialize_f32<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_f32(self.parse_float()?)
-    }
-
-    fn deserialize_f64<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_f64(self.parse_float()?)
-    }
-
-    fn deserialize_char<V>(mut self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        let ch = match self.input.get(0).ok_or(ErrorKind::UnexpectedInput.into())? {
-            '\n' | '\r' => return Err(ErrorKind::UnexpectedInput.into()),
-            ch => ch
-        };
-        let input = &self.input[ch.len_utf8()..];
-        let input = self.check_next_newline(input)?;
-        self.input = input;
-        visitor.visit_char(ch)
-    }
-
-    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        match self.input.split_next_newline() {
-            (ref line, Some(ref rest)) => {
-                let input = self.input[string.len()..];
-                let input = self.check_next_newline(input)?;
-                self.input = input;
-                visitor.visit_borrowed_str(line)
-            },
-            (ref line, None) => {
-                self.input = &self.input[self.input.len()..];
-                visitor.visit_borrowed_str(line)
-            }
-        }
-    }
-
-    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        self.deserialize_str(visitor)
-    }
-
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de>
-    {
-        Err(ErrorKind::Unsupported.into())
-    }
-
-    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        Err(ErrorKind::Unsupported.into())
-    }
-
-    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        if self.input.len() == 0 {
-            visitor.visit_none()
-        } else {
-            visitor.visit_some(self)
-        }
-    }
-
-    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        if self.input.len() == 0 {
-            visitor.visit_unit()
-        } else {
-            Err(ErrorKind::UnexpectedInput.into())
-        }
-    }
-
-    fn deserialize_unit_struct<V>(self,
-                                  _name: &'static str,
-                                  visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        self.deserialize_unit(visitor)
-    }
-
-    fn deserialize_newtype_struct<V>(self,
-                                  _name: &'static str,
-                                  visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_newtype_struct(self)
-    }
-
-    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
-        where V: Visitor<'de>
-    {
-        visitor.visit_newtype_struct(self)
-    }
-}
-*/
 /// Trait for shared parsing functionality for simple types
 impl<'de> DeserializerInner<'de> {
     /// Parse a boolean
@@ -913,17 +693,8 @@ impl<'de> DeserializerInner<'de> {
     fn parse_unsigned<T>(&mut self) -> Result<T>
     where
         T: FromStr,
-        <T as FromStr>::Err: fmt::Debug,
     {
-        match nom_parsers::parse_unsigned(self.input) {
-            Ok((next_input, recognised)) => {
-                self.input = next_input;
-                Ok(recognised
-                    .parse()
-                    .expect("internal error: recognised but failed parse"))
-            }
-            Err(_) => Err(ErrorKind::ExpectedUnsigned.into()),
-        }
+        self.input.parse().map_err(|_| ErrorKind::ExpectedUnsigned.into())
     }
 
     /// Parse a signed int
@@ -932,15 +703,7 @@ impl<'de> DeserializerInner<'de> {
         T: FromStr,
         <T as FromStr>::Err: fmt::Debug,
     {
-        match nom_parsers::parse_signed(self.input) {
-            Ok((next_input, recognised)) => {
-                self.input = next_input;
-                Ok(recognised
-                    .parse()
-                    .expect("internal error: recognised but failed parse"))
-            }
-            Err(_) => Err(ErrorKind::ExpectedSigned.into()),
-        }
+        self.input.parse().map_err(|_| ErrorKind::ExpectedSigned.into())
     }
 
     /// Parse a float
@@ -951,16 +714,37 @@ impl<'de> DeserializerInner<'de> {
         T: FromStr,
         <T as FromStr>::Err: ::std::error::Error
     {
-        match nom_parsers::parse_float(self.input) {
-            Ok((next_input, unparsed)) => {
-                // unlike previously we can see that some recognised strings will not parse
-                let parsed = unparsed.parse::<T>()
-                    .map_err(|_| Error::from(ErrorKind::ExpectedFloat))?;
-                self.input = next_input;
-                Ok(parsed)
-            }
-            Err(_) => Err(ErrorKind::ExpectedFloat.into()),
-        }
+        self.input.parse().map_err(|_| ErrorKind::ExpectedFloat.into())
+    }
+}
+
+struct AlpmSeq<'a, 'de: 'a> {
+    de: &'a mut DeserializerInner<'de>,
+}
+
+impl<'a, 'de> AlpmSeq<'a, 'de> {
+    fn new(de: &'a mut DeserializerInner<'de>) -> Self {
+        AlpmSeq { de }
+    }
+}
+
+impl<'a, 'de> SeqAccess<'de> for AlpmSeq<'a, 'de> {
+    type Error = Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
+        where
+            T: DeserializeSeed<'de>,
+    {
+        let element = self.de.parse_seq_element();
+        Ok(if element.len() == 0 {
+            None
+        } else {
+            Some(seed.deserialize(DeserializerInner {
+                input: element,
+                allow_list: false,
+                line_ending: self.de.line_ending,
+            })?)
+        })
     }
 }
 
@@ -968,6 +752,7 @@ impl<'de> DeserializerInner<'de> {
 mod nom_parsers {
     use nom::{ErrorKind, IResult};
 
+    /*
     /// We need our own is_digit, because nom's version works on u8, not char
     fn is_digit(chr: char) -> bool {
         match chr {
@@ -976,24 +761,26 @@ mod nom_parsers {
         }
     }
 
-    named!(pub parse_float(&str) -> &str, recognize!(
-        do_parse!(
-            opt!(alt!(tag!("+") | tag!("-"))) >>
-            take_till!(call!(is_digit)) >>
-            opt!(tag!(".")) >>
-            take_till!(call!(is_digit)) >>
-            (())
-        )
+    named!(pub parse_unsigned(&str) -> &str, recognize!(
+        take_while1!(call!(is_digit))
     ));
-
-    named!(pub parse_unsigned(&str) -> &str,
-           recognize!(take_till1!(call!(is_digit))));
 
     named!(pub parse_signed(&str) -> &str, recognize!(do_parse!(
         opt!(alt!(tag!("+") | tag!("-"))) >>
-        take_till1!(call!(is_digit)) >>
+        take_while1!(call!(is_digit)) >>
         (())
     )));
+
+    named!(pub parse_float(&str) -> &str, recognize!(
+        do_parse!(
+            opt!(alt!(tag!("+") | tag!("-"))) >>
+            take_while!(call!(is_digit)) >>
+            opt!(tag!(".")) >>
+            take_while!(call!(is_digit)) >>
+            (())
+        )
+    ));
+    */
 
     pub fn parse_key<'a>(input: &'a str, line_ending: &'static str) -> IResult<&'a str, &'a str> {
         do_parse!(input,
@@ -1003,5 +790,38 @@ mod nom_parsers {
             tag!(line_ending) >>
             (name)
         )
+    }
+
+    /*
+    #[test]
+    fn test_is_digit() {
+        for positive in ['0', '1', '2', '3', '8', '9'].iter() {
+            assert!(is_digit(*positive));
+        }
+        for negative in ['a', '.', '$', '😄'].iter() {
+            assert!(!is_digit(*negative));
+        }
+    }
+
+    #[test]
+    fn test_parse_unsigned() {
+        assert_eq!(parse_unsigned("60 sef"), Ok((" sef", "60")));
+    }
+
+    #[test]
+    fn test_parse_signed() {
+        assert_eq!(parse_signed("60 sef"), Ok((" sef", "60")));
+    }
+
+    #[test]
+    fn test_parse_float() {
+        assert_eq!(parse_float("60. sef"), Ok((" sef", "60.")));
+    }
+    */
+
+    #[test]
+    fn test_parse_key() {
+        assert_eq!(parse_key("%NAME%\n sef", "\n"), Ok((" sef", "NAME")));
+        assert_eq!(parse_key("%NAME%\r\n sef", "\r\n"), Ok((" sef", "NAME")));
     }
 }

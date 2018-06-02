@@ -15,18 +15,30 @@ pub struct Error {
 /// Errors that can occur during serialization.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
 pub enum ErrorKind {
-    /// Some i/o error occurred.
-    #[fail(display = "an i/o error occured")]
-    Io,
     /// This format does not support the given operation
     #[fail(display = "tried to serialize an unsupported type/context")]
     Unsupported,
-    /// The deserializer received unexpected input
-    #[fail(display = "The deserializer received unexpected input")]
-    UnexpectedInput,
     /// The deserializer expected a bool
-    #[fail(display = "The deserializer received unexpected input")]
+    #[fail(display = "expected a bool")]
     ExpectedBool,
+    /// The deserializer expected an unsigned integer
+    #[fail(display = "expected an unsigned integer")]
+    ExpectedUnsigned,
+    /// The deserializer expected a signed integer
+    #[fail(display = "expected a signed integer")]
+    ExpectedSigned,
+    /// The deserializer expected a float
+    #[fail(display = "expected a float")]
+    ExpectedFloat,
+    /// The deserializer expected a char
+    #[fail(display = "expected a char")]
+    ExpectedChar,
+    /// The deserializer expected a key (`%NAME%\n`)
+    #[fail(display = "expected a key (`%NAME%\n`)")]
+    ExpectedKey,
+    /// The deserializer expected an empty string
+    #[fail(display = "expected an empty string")]
+    ExpectedEmpty,
     /// A Serialize method returned a custom error.
     #[fail(display = "the type being serialized reported an error")]
     Custom,
@@ -89,12 +101,6 @@ impl de::Error for Error {
             T: Display,
     {
         format_err!("{}", msg).context(ErrorKind::Custom).into()
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        err.context(ErrorKind::Io).into()
     }
 }
 
