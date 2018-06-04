@@ -1,6 +1,7 @@
 //! Serde serializer for alpm desc format
 //!
 //! format is
+//!
 //! ```text
 //! %name%
 //! value

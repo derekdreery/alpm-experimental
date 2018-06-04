@@ -49,6 +49,15 @@ pub enum ErrorKind {
     /// There was an unexpected error when creating a database.
     #[fail(display = "Could not create database \"{}\" on the filesystem.", _0)]
     CannotCreateDatabase(DbName),
+    /// Could not query database on the filesystem.
+    #[fail(display = "Could not query database \"{}\" on the filesystem.", _0)]
+    CannotQueryDatabase(DbName),
+    /// There was an error when getting/updating the database version.
+    #[fail(display = "there was an unexpected error getting/updating the version for database \"{}\"", _0)]
+    DatabaseVersion(DbName),
+    /// There was an unexpected i/o error
+    #[fail(display = "there was an unexpected i/o error")]
+    UnexpectedIo,
 }
 
 impl ErrorKind {}

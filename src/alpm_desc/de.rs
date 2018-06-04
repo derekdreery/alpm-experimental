@@ -1,6 +1,7 @@
 //! Serde deserializer for alpm desc format
 //!
 //! format is
+//!
 //! ```text
 //! %name%
 //! value
@@ -19,9 +20,7 @@ use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visito
 use std::fmt;
 use std::str::FromStr;
 
-pub const NEWLINE_CRLF: &str = "\r\n";
-pub const NEWLINE_LF: &str = "\n";
-
+/// A deserializer for the alpm db format.
 pub struct Deserializer<'de> {
     input: &'de str,
     line_ending: &'static str,
@@ -34,7 +33,7 @@ impl<'de> Deserializer<'de> {
     pub fn from_str(input: &'de str) -> Self {
         Deserializer {
             input,
-            line_ending: NEWLINE_CRLF,
+            line_ending: "\r\n",
             double_line_ending: "\r\n\r\n", // concat! doesn't work
         }
     }
@@ -44,7 +43,7 @@ impl<'de> Deserializer<'de> {
     pub fn from_str(input: &'de str) -> Self {
         Deserializer {
             input,
-            line_ending: NEWLINE_LF,
+            line_ending: "\n",
             double_line_ending: "\n\n",
         }
     }
@@ -403,7 +402,7 @@ impl<'a, 'de> MapAccess<'de> for AlpmMap<'a, 'de> {
     }
 }
 
-pub struct DeserializerInner<'de> {
+struct DeserializerInner<'de> {
     input: &'de str,
     allow_list: bool,
     line_ending: &'static str,

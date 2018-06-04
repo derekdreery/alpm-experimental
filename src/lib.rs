@@ -1,3 +1,10 @@
+//! A library to manipulate a system managed by the Alpm (Arch Linux Package Manager).
+//!
+
+#![feature(nll)]
+#![feature(str_escape)]
+
+extern crate atoi;
 #[macro_use]
 extern crate bitflags;
 #[macro_use]
@@ -47,9 +54,6 @@ pub const SYNC_DB_EXT: &str = "db";
 /// same db.
 pub struct Alpm {
     /// The local package database
-    ///
-    /// This is only an option for initialization, once the struct
-    /// is made it will always be `Some`.
     local_database: DbBase,
     /// A list of all sync databases
     sync_databases: Vec<DbBase>,
@@ -101,6 +105,12 @@ impl Alpm {
         &'a mut self,
         name: impl AsRef<str>,
     ) -> Result<Db<'a>, Error> {
+        let name = name.as_ref();
+        // If we've already registered the database, just return it
+        if let Some(db) = self.sync_databases.iter().find(|&db| db.name() == name) {
+            warn!(r#"database "{}" already registered"#, name);
+            return Ok(Db::new(db, self));
+        }
         let base = DbBase::new_sync(name, self, SignatureLevel::default())?;
         let db_idx = self.sync_databases.len();
         self.sync_databases.push(base);
@@ -114,6 +124,30 @@ impl Alpm {
             return true;
         }
         self.sync_databases.iter().any(|db| db.name() == name)
+    }
+
+    /// Unregister a sync database.
+    ///
+    /// Database is left on the filesystem and will not be touched after this is called.
+    pub fn unregister_sync_database(&mut self, name: impl AsRef<str>) {
+        let name = name.as_ref();
+        if let Some(idx) = self.sync_databases.iter().position(|db| db.name() == name) {
+            self.sync_databases.remove(idx);
+        } else {
+            warn!("could not find a database with name \"{}\"", name);
+        }
+    }
+
+    /// Get the local database for this alpm instance.
+    pub fn local_database<'a>(&'a self) -> Db<'a> {
+        Db::new(&self.local_database, self)
+    }
+
+    /// Get a sync database with the given name for this alpm instance.
+    pub fn sync_database<'a>(&'a self, name: impl AsRef<str>) -> Option<Db<'a>> {
+        self.sync_databases.iter()
+            .find(|&db| db.name().as_str() == name.as_ref())
+            .map(|db| Db::new(db, self))
     }
 }
 

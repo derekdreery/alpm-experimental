@@ -14,6 +14,12 @@ fn main() -> Result<(), Error> {
         .filter_module("tokio_core", LevelFilter::Warn)
         .init();
 
-    let alpm = Alpm::new().build()?;
+    let mut alpm = Alpm::new().build()?;
+    {
+        let db = alpm.local_database();
+        println!("local db status: {:?}", db.status()?);
+    }
+    let core = alpm.register_sync_database("core")?;
+    println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     Ok(())
 }

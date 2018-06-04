@@ -6,13 +6,13 @@ use std::result::Result as StdResult;
 use failure::{Fail, Context, Backtrace, Compat, err_msg};
 use serde::{de, ser};
 
-/// The error type for serialization
+/// The error type for deserialization
 #[derive(Debug)]
 pub struct Error {
     inner: Context<ErrorKind>,
 }
 
-/// Errors that can occur during serialization.
+/// Errors that can occur during deserialization.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
 pub enum ErrorKind {
     /// This format does not support the given operation

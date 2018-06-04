@@ -1,43 +1,71 @@
-use error::ErrorKind;
 use std::cmp;
 use std::fmt;
+use std::fs;
+use std::io::{self, Read, Write};
 use std::path::{self, Path, PathBuf};
+use std::collections::HashSet;
+
+use error::{ErrorKind, Error};
 use {Alpm, LOCAL_DB_NAME, SYNC_DB_DIR, SYNC_DB_EXT};
+
+use atoi::atoi;
+use failure::{Fail, ResultExt, err_msg};
+
+const LOCAL_DB_VERSION_FILE: &str = "ALPM_DB_VERSION";
+const LOCAL_DB_CURRENT_VERSION: u64 = 9;
 
 /// A package database.
 pub struct Db<'a> {
     base: &'a DbBase,
     handle: &'a Alpm,
+    /// A cache of the database path.
+    path: PathBuf,
 }
 
 impl<'a> Db<'a> {
     /// Helper to create this data structure.
     pub(crate) fn new(base: &'a DbBase, handle: &'a Alpm) -> Db<'a> {
-        Db { base, handle }
+        // todo avoid allocating this path every time we create a Db
+        let path = base.name.path(&handle.database_path);
+        Db { base, handle, path }
     }
 
     /// Get the path of this database.
-    pub fn path(&self) -> PathBuf {
-        self.base.name.path(&self.handle.database_path)
+    #[inline]
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Get the status of the database.
-    pub fn status(&self) -> DbStatus {
+    pub fn status(&self) -> Result<DbStatus, Error> {
         // alpm checks path name, but we do this during construction.
 
         // check if database is missing
-        if !self.path().is_dir() {
-            return DbStatus::Missing;
-        }
+        let metadata = match fs::metadata(self.path()) {
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound =>
+                return Ok(DbStatus::Missing),
+            Err(e) =>
+                return Err(e.context(ErrorKind::CannotQueryDatabase(
+                    self.base.name.to_owned()
+                )).into()),
+            Ok(md) => md
+        };
 
-        // check signatures
-        if true {
-            // todo
-            DbStatus::Exists { valid: true }
-        } else {
-            DbStatus::Exists { valid: false }
-        }
+        self.base.is_valid(metadata, self.path())
+            .map(|valid| DbStatus::Exists { valid })
     }
+
+    /// Is this database a local database
+    fn is_local(&self) -> bool {
+        self.base.name.is_local()
+    }
+
+    /// Is this database a sync database
+    fn is_sync(&self) -> bool {
+        self.base.name.is_sync()
+    }
+
+
 }
 
 /// A package database.
@@ -51,13 +79,12 @@ pub(crate) struct DbBase {
     sig_level: SignatureLevel,
     /// Which operations this database will be used for.
     usage: DbUsage,
+    /// A list of servers for this database
+    servers: HashSet<String>,
 }
 
 impl DbBase {
     /// Create a new db instance
-    ///
-    /// Optionally supply a handle to check for duplicates. If this is not possible (because the
-    /// alpm instance does not exist yet), check_for_duplicates should be called afterwards.
     pub(crate) fn new(
         name: DbName,
         handle: &Alpm,
@@ -98,6 +125,7 @@ impl DbBase {
             name,
             sig_level,
             usage: DbUsage::ALL,
+            servers: HashSet::new(),
         }
     }
 
@@ -105,6 +133,62 @@ impl DbBase {
     #[inline]
     pub(crate) fn name(&self) -> &DbName {
         &self.name
+    }
+
+    /// Validate the database.
+    ///
+    /// # Params
+    ///  - `md` metadata for the database root
+    ///  - `path` the path of the database root
+    ///
+    /// Returns true if the database is valid, false otherwise
+    fn is_valid(&self, md: fs::Metadata, path: &Path) -> Result<bool, Error> {
+
+        #[inline]
+        fn create_version_file(path: &Path) -> io::Result<()> {
+            let mut version_file = fs::File::create(&path)?;
+            // Format is number followed by single newline
+            write!(version_file, "{}\n", LOCAL_DB_CURRENT_VERSION)?;
+            Ok(())
+        }
+
+        if self.name.is_local() {
+            if ! md.is_dir() {
+                return Ok(false);
+            }
+            let version_path = path.join(LOCAL_DB_VERSION_FILE);
+            Ok(match fs::read(&version_path) {
+                Ok(version_raw) => {
+                    // Check version is up to date.
+                    let version: u64 = atoi(&version_raw)
+                        .ok_or(format_err!(r#""{}" is not a valid version"#,
+                                           String::from_utf8_lossy(&version_raw)))
+                        .context(ErrorKind::DatabaseVersion(self.name.to_owned()))?;
+
+                    version == LOCAL_DB_CURRENT_VERSION
+                },
+                Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+                    // check directory is empty and create version file
+                    let mut read_dir = fs::read_dir(path)
+                        .context(ErrorKind::DatabaseVersion(self.name.to_owned()))?;
+                    match read_dir.next() {
+                        Some(_) => false,
+                        None => {
+                            panic!("I'm not ready to let this actually do stuff yet!");
+                            create_version_file(&version_path)
+                                .context(ErrorKind::DatabaseVersion(self.name.to_owned()))?;
+                            true
+                        }
+                    }
+                },
+                Err(e) => return Err(e.context(
+                    ErrorKind::DatabaseVersion(self.name.to_owned())
+                ).into())
+            })
+        } else {
+            // todo
+            Ok(true)
+        }
     }
 }
 
@@ -186,7 +270,7 @@ impl DbName {
     /// Fails if the name contains path separators (for any OS environment) or dot ('.')
     pub fn valid_syncdb_name(name: impl AsRef<str>) -> bool {
         for ch in name.as_ref().chars() {
-            if path::is_separator(ch) || ch == '.' {
+            if path::is_separator(ch) || ch == '.' || ch == '\\' || ch == '/' {
                 return false;
             }
         }
@@ -320,7 +404,6 @@ mod tests {
         );
         assert_eq!(&DbName::new("local").unwrap(), DbName::LOCAL);
         assert!(DbName::new("bad/name").is_err());
-        #[cfg(windows)]
         assert!(DbName::new("bad\\name").is_err());
         assert!(DbName::new("bad.name").is_err());
     }
