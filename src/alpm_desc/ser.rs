@@ -449,7 +449,7 @@ impl<'a, W: Write> ser::Serializer for SerializerValueOrList<'a, W> {
     }
 
     // We don't support binary data
-    fn serialize_bytes(self, v: &[u8]) -> Result<()> {
+    fn serialize_bytes(self, _v: &[u8]) -> Result<()> {
         Err(ErrorKind::Unsupported.into())
     }
 
@@ -744,7 +744,6 @@ where
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
-        unimplemented!();
         write!(self.inner.writer, "%")?;
         for byte in v {
             write!(self.inner.writer, "{:x}", byte)?;
@@ -779,14 +778,14 @@ where
 
     fn serialize_unit_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
     ) -> Result<()> {
         Err(ErrorKind::Unsupported.into())
     }
 
-    fn serialize_newtype_struct<T>(self, name: &'static str, value: &T) -> Result<()>
+    fn serialize_newtype_struct<T>(self, _name: &'static str, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
@@ -798,29 +797,29 @@ where
     // only keyed maps are supported at root
     fn serialize_newtype_variant<T: ?Sized>(
         self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        value: &T,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _value: &T,
     ) -> Result<()> {
         Err(ErrorKind::Unsupported.into())
     }
 
     // only keyed maps are supported at root
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
         Err(ErrorKind::Unsupported.into())
     }
 
     // only keyed maps are supported at root
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
+    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple> {
         Err(ErrorKind::Unsupported.into())
     }
 
     // only keyed maps are supported at root
     fn serialize_tuple_struct(
         self,
-        name: &'static str,
-        len: usize,
+        _name: &'static str,
+        _len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
         Err(ErrorKind::Unsupported.into())
     }
@@ -828,19 +827,19 @@ where
     // only keyed maps are supported at root
     fn serialize_tuple_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        len: usize,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
         Err(ErrorKind::Unsupported.into())
     }
 
-    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
         Err(ErrorKind::Unsupported.into())
     }
 
-    fn serialize_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
+    fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
         // we ignore the struct's name and serialize the field names only
         Err(ErrorKind::Unsupported.into())
     }
@@ -848,10 +847,10 @@ where
     // only keyed maps are supported at root
     fn serialize_struct_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        len: usize,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
         Err(ErrorKind::Unsupported.into())
     }

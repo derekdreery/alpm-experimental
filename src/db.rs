@@ -1,15 +1,20 @@
+//! Functionality relating to alpm databases (local and sync).
+use std::cell::{self, RefCell};
+use std::collections::HashSet;
+use std::convert::TryInto;
 use std::cmp;
-use std::fmt;
+use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Read, Write};
+use std::ops::Deref;
 use std::path::{self, Path, PathBuf};
-use std::collections::HashSet;
 
 use error::{ErrorKind, Error};
-use {Alpm, LOCAL_DB_NAME, SYNC_DB_DIR, SYNC_DB_EXT};
+use {Alpm, LOCAL_DB_NAME, SYNC_DB_DIR};
 
 use atoi::atoi;
 use failure::{Fail, ResultExt, err_msg};
+use reqwest::Url;
 
 const LOCAL_DB_VERSION_FILE: &str = "ALPM_DB_VERSION";
 const LOCAL_DB_CURRENT_VERSION: u64 = 9;
@@ -18,22 +23,18 @@ const LOCAL_DB_CURRENT_VERSION: u64 = 9;
 pub struct Db<'a> {
     base: &'a DbBase,
     handle: &'a Alpm,
-    /// A cache of the database path.
-    path: PathBuf,
 }
 
 impl<'a> Db<'a> {
     /// Helper to create this data structure.
     pub(crate) fn new(base: &'a DbBase, handle: &'a Alpm) -> Db<'a> {
-        // todo avoid allocating this path every time we create a Db
-        let path = base.name.path(&handle.database_path);
-        Db { base, handle, path }
+        Db { base, handle }
     }
 
     /// Get the path of this database.
     #[inline]
     pub fn path(&self) -> &Path {
-        &self.path
+        self.base.path()
     }
 
     /// Get the status of the database.
@@ -41,7 +42,7 @@ impl<'a> Db<'a> {
         // alpm checks path name, but we do this during construction.
 
         // check if database is missing
-        let metadata = match fs::metadata(self.path()) {
+        let metadata = match fs::metadata(&self.path().deref()) {
             Err(ref e) if e.kind() == io::ErrorKind::NotFound =>
                 return Ok(DbStatus::Missing),
             Err(e) =>
@@ -56,15 +57,72 @@ impl<'a> Db<'a> {
     }
 
     /// Is this database a local database
-    fn is_local(&self) -> bool {
+    pub fn is_local(&self) -> bool {
         self.base.name.is_local()
     }
 
     /// Is this database a sync database
-    fn is_sync(&self) -> bool {
+    pub fn is_sync(&self) -> bool {
         self.base.name.is_sync()
     }
 
+    pub fn servers(&'a self) -> cell::Ref<'a, HashSet<Url>> {
+        self.base.servers.borrow()
+    }
+
+    /// Add server
+    pub fn add_server(&self, url: impl Into<UrlOrStr<'a>>) -> Result<(), Error>
+    {
+        let url = match url.into() {
+            UrlOrStr::Url(url) => url,
+            UrlOrStr::Str(ref s) => s.parse::<Url>()
+                .context(format_err!(r#""{}" is not a valid url"#, s))
+                .context(ErrorKind::CannotAddServerToDatabase {
+                    url: format!("{}", s),
+                    database: self.base.name().to_owned(),
+                })?
+        };
+        if self.is_local() {
+            return Err(err_msg("cannot add a server to a local database")
+                .context(ErrorKind::CannotAddServerToDatabase {
+                    url: format!("{}", url),
+                    database: self.base.name().to_owned(),
+                }).into());
+        }
+        debug!(r#"adding server with url "{}" from database "{}"."#,
+               url, self.base.name);
+        if ! self.base.servers.borrow_mut().insert(url.clone()) {
+            warn!(r#"server with url "{}" was already present in database "{}"."#,
+                  url, self.base.name);
+        }
+        Ok(())
+    }
+
+    /// Remove the server with the given url, if present
+    pub fn remove_server(&mut self, url: impl Into<UrlOrStr<'a>>) -> Result<(), Error> {
+        let url = match url.into() {
+            UrlOrStr::Url(url) => url,
+            UrlOrStr::Str(ref s) => s.parse::<Url>()
+                .context(format_err!(r#""{}" is not a valid url"#, s))
+                .context(ErrorKind::CannotAddServerToDatabase {
+                    url: format!("{}", s),
+                    database: self.base.name().to_owned(),
+                })?
+        };
+        debug!(r#"removing server with url "{}" from database "{}"."#,
+               url, self.base.name);
+
+        if ! self.base.servers.borrow_mut().remove(&url) {
+            warn!(r#"server with url "{}" was not present in database "{}"."#,
+                  url, self.base.name);
+        }
+        Ok(())
+    }
+
+    pub fn clear_servers(&mut self) {
+        debug!(r#"removing all servers from database "{}"."#, self.base.name);
+        self.base.servers.borrow_mut().clear()
+    }
 
 }
 
@@ -80,7 +138,9 @@ pub(crate) struct DbBase {
     /// Which operations this database will be used for.
     usage: DbUsage,
     /// A list of servers for this database
-    servers: HashSet<String>,
+    servers: RefCell<HashSet<Url>>,
+    /// The database path.
+    path: PathBuf,
 }
 
 impl DbBase {
@@ -93,8 +153,9 @@ impl DbBase {
         if handle.database_exists(&name) {
             return Err(ErrorKind::DatabaseAlreadyExists(name));
         }
+        let path = name.path(handle.database_path(), handle.database_extension());
 
-        Ok(DbBase::new_no_check_duplicates(name, sig_level))
+        Ok(DbBase::new_no_check_duplicates(name, sig_level, path))
     }
 
     /// Create a new sync db instance
@@ -120,12 +181,15 @@ impl DbBase {
     ///
     /// Only use this function before the alpm instance is instantiated. It is up to the
     /// caller to check there are no duplicates.
-    pub(crate) fn new_no_check_duplicates(name: DbName, sig_level: SignatureLevel) -> DbBase {
+    pub(crate) fn new_no_check_duplicates(name: DbName,
+                                          sig_level: SignatureLevel,
+                                          path: PathBuf) -> DbBase {
         DbBase {
             name,
             sig_level,
             usage: DbUsage::ALL,
-            servers: HashSet::new(),
+            servers: RefCell::new(HashSet::new()),
+            path,
         }
     }
 
@@ -142,7 +206,9 @@ impl DbBase {
     ///  - `path` the path of the database root
     ///
     /// Returns true if the database is valid, false otherwise
-    fn is_valid(&self, md: fs::Metadata, path: &Path) -> Result<bool, Error> {
+    fn is_valid(&self, md: fs::Metadata, path: impl Deref<Target=Path>)
+        -> Result<bool, Error>
+    {
 
         #[inline]
         fn create_version_file(path: &Path) -> io::Result<()> {
@@ -169,12 +235,11 @@ impl DbBase {
                 },
                 Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                     // check directory is empty and create version file
-                    let mut read_dir = fs::read_dir(path)
+                    let mut read_dir = fs::read_dir(&path.deref())
                         .context(ErrorKind::DatabaseVersion(self.name.to_owned()))?;
                     match read_dir.next() {
                         Some(_) => false,
                         None => {
-                            panic!("I'm not ready to let this actually do stuff yet!");
                             create_version_file(&version_path)
                                 .context(ErrorKind::DatabaseVersion(self.name.to_owned()))?;
                             true
@@ -186,9 +251,18 @@ impl DbBase {
                 ).into())
             })
         } else {
-            // todo
+            if ! md.is_file() {
+                return Ok(false);
+            }
+            // todo check signature
             Ok(true)
         }
+    }
+
+    /// The path of this database
+    fn path(&self) -> &Path
+    {
+        &self.path
     }
 }
 
@@ -249,7 +323,7 @@ impl DbName {
     /// Get the path for this database name
     ///
     /// Must supply the root database path from the alpm instance.
-    fn path(&self, database_path: impl AsRef<Path>) -> PathBuf {
+    pub(crate) fn path(&self, database_path: impl AsRef<Path>, ext: impl AsRef<str>) -> PathBuf {
         let database_path = database_path.as_ref();
         // path is
         //  - `$db_path SEP $name` for local
@@ -259,7 +333,7 @@ impl DbName {
             &DbNameInner::Sync(ref name) => {
                 let mut path = database_path.join(SYNC_DB_DIR);
                 path.push(name);
-                path.set_extension(SYNC_DB_EXT);
+                path.set_extension(ext.as_ref());
                 path
             }
         }
@@ -378,9 +452,11 @@ bitflags! {
     }
 }
 
+/// The trust level that signatures must match.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum SignatureLevel {
-    Default,
+    /// Inherit the signature level required from the parent Alpm instance.
+    Inherit,
     Optional,
     MarginalOk,
     UnknownOk,
@@ -388,7 +464,36 @@ pub enum SignatureLevel {
 
 impl Default for SignatureLevel {
     fn default() -> Self {
-        SignatureLevel::Default
+        SignatureLevel::Inherit
+    }
+}
+
+/// This structure only exists until `impl TryFrom<AsRef<str>> for Url` exists.
+pub enum UrlOrStr<'a> {
+    /// A url
+    Url(Url),
+    /// A borrowed string
+    Str(&'a str),
+}
+
+impl From<Url> for UrlOrStr<'static> {
+    fn from(url: Url) -> UrlOrStr<'static> {
+        UrlOrStr::Url(url)
+    }
+}
+
+impl<'a> From<&'a str> for UrlOrStr<'a> {
+    fn from(s: &'a str) -> UrlOrStr<'a> {
+        UrlOrStr::Str(s)
+    }
+}
+
+impl<'a> Display for UrlOrStr<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UrlOrStr::Url(ref url) => Display::fmt(url, f),
+            UrlOrStr::Str(ref s) => Display::fmt(s, f)
+        }
     }
 }
 
@@ -412,6 +517,7 @@ mod tests {
     fn db_path() {
         let base_path = "/var/lib/pacman/";
         let base_path2 = "/var/lib/pacman";
+        let ext = "db";
 
         let tests = vec![
             ("local", "/var/lib/pacman/local"),
@@ -420,8 +526,8 @@ mod tests {
         for (db_name, target) in tests {
             let db_name = DbName::new(db_name).unwrap();
             let target = Path::new(target);
-            assert_eq!(db_name.path(&base_path), target);
-            assert_eq!(db_name.path(&base_path2), target);
+            assert_eq!(db_name.path(&base_path, &ext), target);
+            assert_eq!(db_name.path(&base_path2, &ext), target);
         }
     }
 }

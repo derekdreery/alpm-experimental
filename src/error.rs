@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 
 use db::DbName;
 
+/// The main error type for this library.
 #[derive(Debug)]
 pub struct Error {
     inner: Context<ErrorKind>,
 }
 
+/// The different kinds of error that can occur in this library.
 #[derive(Debug, Clone, Fail, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum ErrorKind {
     /// Indicates that the specified root directory is not valid, either because it is
@@ -22,6 +24,10 @@ pub enum ErrorKind {
     #[fail(display = "The database path \"{:?}\" does not point to a valid directory on the system.",
            _0)]
     BadDatabasePath(PathBuf),
+    /// The extension provided is not a valid database extension.
+    #[fail(display = "\"{}\" is not a valid database extension.",
+    _0)]
+    BadSyncDatabaseExt(String),
     /// Indicates that the specified sync database directory is not valid, either because it is
     /// inaccessible, or because it is not a directory.
     #[fail(display = "The sync database path \"{:?}\" does not point to a valid directory on the system.",
@@ -46,15 +52,36 @@ pub enum ErrorKind {
     /// A given database name already exists.
     #[fail(display = "Database with name \"{}\" already exists", _0)]
     DatabaseAlreadyExists(DbName),
+    /// Cannot find a database with the given name.
+    #[fail(display = "Cannot find database with name \"{}\"", _0)]
+    DatabaseNotFound(DbName),
     /// There was an unexpected error when creating a database.
     #[fail(display = "Could not create database \"{}\" on the filesystem.", _0)]
     CannotCreateDatabase(DbName),
     /// Could not query database on the filesystem.
     #[fail(display = "Could not query database \"{}\" on the filesystem.", _0)]
     CannotQueryDatabase(DbName),
+    /// Failed to add server with given url to database.
+    #[fail(display = "Cannot add server with url \"{}\" to database \"{}\".", url, database)]
+    CannotAddServerToDatabase {
+        url: String,
+        database: DbName,
+    },
     /// There was an error when getting/updating the database version.
     #[fail(display = "there was an unexpected error getting/updating the version for database \"{}\"", _0)]
     DatabaseVersion(DbName),
+    /// Error configuring gpg.
+    #[fail(display = "there was an error configuring gpgme")]
+    Gpgme,
+    /// A signature was missing.
+    #[fail(display = "a signature was missing")]
+    SignatureMissing,
+    /// A signature did not match.
+    #[fail(display = "a signature did not match")]
+    SignatureIncorrect,
+    /// An unexpected error occurred during signature verification.
+    #[fail(display = "an unexpected error occurred while processing a signature for \"{}\"", _0)]
+    UnexpectedSignature(String),
     /// There was an unexpected i/o error
     #[fail(display = "there was an unexpected i/o error")]
     UnexpectedIo,

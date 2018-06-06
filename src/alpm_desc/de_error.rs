@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use std::io;
 use std::result::Result as StdResult;
 
-use failure::{Fail, Context, Backtrace, Compat, err_msg};
+use failure::Context;
 use serde::{de, ser};
 
 /// The error type for deserialization
@@ -21,6 +21,9 @@ pub enum ErrorKind {
     /// The deserializer expected a bool
     #[fail(display = "expected a bool")]
     ExpectedBool,
+    /// The deserializer expected a hex-encoded byte
+    #[fail(display = "expected a hex-encoded byte")]
+    ExpectedByte,
     /// The deserializer expected an unsigned integer
     #[fail(display = "expected an unsigned integer")]
     ExpectedUnsigned,

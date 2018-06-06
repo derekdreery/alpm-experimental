@@ -42,3 +42,10 @@ pub fn check_valid_directory(path: &Path) -> io::Result<()> {
         Err(e) => Err(e),
     }
 }
+
+/// Check a string is a valid db extension.
+///
+/// For now, just allow ascii alphanumeric. This could be relaxed later.
+pub fn is_valid_db_extension(ext: &str) -> bool {
+    ext.chars().all(|ch| ch.is_alphanumeric())
+}

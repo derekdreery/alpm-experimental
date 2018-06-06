@@ -3,8 +3,8 @@ use std::fmt::{self, Display};
 use std::io;
 use std::result::Result as StdResult;
 
-use failure::{Fail, Context, Backtrace, Compat, err_msg};
-use serde::{de, ser};
+use failure::{Fail, Context};
+use serde::ser;
 
 /// The error type for serialization
 #[derive(Debug)]
