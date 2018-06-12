@@ -1,6 +1,7 @@
 //! Functionality relating to alpm databases (local and sync).
+use std::borrow::Cow;
 use std::cell::{self, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::convert::TryInto;
 use std::cmp;
 use std::fmt::{self, Display};
@@ -8,129 +9,46 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 use std::path::{self, Path, PathBuf};
+use std::rc::Rc;
 
 use error::{ErrorKind, Error};
 use {Alpm, LOCAL_DB_NAME, SYNC_DB_DIR};
 
 use atoi::atoi;
 use failure::{Fail, ResultExt, err_msg};
-use reqwest::Url;
+use fs2::FileExt;
+use reqwest::{self, Url};
+use spin::Once;
 
 const LOCAL_DB_VERSION_FILE: &str = "ALPM_DB_VERSION";
 const LOCAL_DB_CURRENT_VERSION: u64 = 9;
 
-/// A package database.
-pub struct Db<'a> {
-    base: &'a DbBase,
-    handle: &'a Alpm,
+pub trait Database: Debug {
+    /// Get the name of this database
+    pub fn name(&self) -> &str;
+
+    /// Get the path of the root file or directory for this database.
+    pub fn path(&self) -> &Path;
+
+    /// Get the status of this database.
+    pub fn status(&self) -> DbStatus;
+
+    /// Synchronize the database with any external sources.
+    pub fn synchronize(&self) {
+        // do nothing by default
+    }
+
+    /// Get the packages in this database
+    pub fn packages(&self) -> &HashMap<String, Package> {
+        unimplemented!();
+    }
 }
 
-impl<'a> Db<'a> {
-    /// Helper to create this data structure.
-    pub(crate) fn new(base: &'a DbBase, handle: &'a Alpm) -> Db<'a> {
-        Db { base, handle }
-    }
-
-    /// Get the path of this database.
-    #[inline]
-    pub fn path(&self) -> &Path {
-        self.base.path()
-    }
-
-    /// Get the status of the database.
-    pub fn status(&self) -> Result<DbStatus, Error> {
-        // alpm checks path name, but we do this during construction.
-
-        // check if database is missing
-        let metadata = match fs::metadata(&self.path().deref()) {
-            Err(ref e) if e.kind() == io::ErrorKind::NotFound =>
-                return Ok(DbStatus::Missing),
-            Err(e) =>
-                return Err(e.context(ErrorKind::CannotQueryDatabase(
-                    self.base.name.to_owned()
-                )).into()),
-            Ok(md) => md
-        };
-
-        self.base.is_valid(metadata, self.path())
-            .map(|valid| DbStatus::Exists { valid })
-    }
-
-    /// Is this database a local database
-    pub fn is_local(&self) -> bool {
-        self.base.name.is_local()
-    }
-
-    /// Is this database a sync database
-    pub fn is_sync(&self) -> bool {
-        self.base.name.is_sync()
-    }
-
-    pub fn servers(&'a self) -> cell::Ref<'a, HashSet<Url>> {
-        self.base.servers.borrow()
-    }
-
-    /// Add server
-    pub fn add_server(&self, url: impl Into<UrlOrStr<'a>>) -> Result<(), Error>
-    {
-        let url = match url.into() {
-            UrlOrStr::Url(url) => url,
-            UrlOrStr::Str(ref s) => s.parse::<Url>()
-                .context(format_err!(r#""{}" is not a valid url"#, s))
-                .context(ErrorKind::CannotAddServerToDatabase {
-                    url: format!("{}", s),
-                    database: self.base.name().to_owned(),
-                })?
-        };
-        if self.is_local() {
-            return Err(err_msg("cannot add a server to a local database")
-                .context(ErrorKind::CannotAddServerToDatabase {
-                    url: format!("{}", url),
-                    database: self.base.name().to_owned(),
-                }).into());
-        }
-        debug!(r#"adding server with url "{}" from database "{}"."#,
-               url, self.base.name);
-        if ! self.base.servers.borrow_mut().insert(url.clone()) {
-            warn!(r#"server with url "{}" was already present in database "{}"."#,
-                  url, self.base.name);
-        }
-        Ok(())
-    }
-
-    /// Remove the server with the given url, if present
-    pub fn remove_server(&mut self, url: impl Into<UrlOrStr<'a>>) -> Result<(), Error> {
-        let url = match url.into() {
-            UrlOrStr::Url(url) => url,
-            UrlOrStr::Str(ref s) => s.parse::<Url>()
-                .context(format_err!(r#""{}" is not a valid url"#, s))
-                .context(ErrorKind::CannotAddServerToDatabase {
-                    url: format!("{}", s),
-                    database: self.base.name().to_owned(),
-                })?
-        };
-        debug!(r#"removing server with url "{}" from database "{}"."#,
-               url, self.base.name);
-
-        if ! self.base.servers.borrow_mut().remove(&url) {
-            warn!(r#"server with url "{}" was not present in database "{}"."#,
-                  url, self.base.name);
-        }
-        Ok(())
-    }
-
-    pub fn clear_servers(&mut self) {
-        debug!(r#"removing all servers from database "{}"."#, self.base.name);
-        self.base.servers.borrow_mut().clear()
-    }
-
-}
 
 /// A package database.
-///
-/// This contains the actual database data, but is inaccessible to the user as database operations
-/// in general require a handle to the main alpm instance.
-pub(crate) struct DbBase {
+pub struct SyncDatabase {
+    /// Handle to the alpm instance
+    handle: Rc<RefCell<Handle>>,
     /// The name of the database, also used to construct the database path.
     name: DbName,
     /// The level of signature verification required to accept packages
@@ -141,21 +59,25 @@ pub(crate) struct DbBase {
     servers: RefCell<HashSet<Url>>,
     /// The database path.
     path: PathBuf,
+    /// The package cache (HashMap of package name to package
+    package_cache: RefCell<HashMap<String, Package>>,
 }
 
-impl DbBase {
+impl Db {
     /// Create a new db instance
     pub(crate) fn new(
         name: DbName,
-        handle: &Alpm,
+        handle: Rc<RefCell<Alpm>>,
         sig_level: SignatureLevel,
     ) -> Result<DbBase, ErrorKind> {
         if handle.database_exists(&name) {
             return Err(ErrorKind::DatabaseAlreadyExists(name));
         }
-        let path = name.path(handle.database_path(), handle.database_extension());
 
-        Ok(DbBase::new_no_check_duplicates(name, sig_level, path))
+        Ok(DbBase::new_no_check_duplicates(name,
+                                           sig_level,
+                                           handle.database_path(),
+                                           handle.database_extension()))
     }
 
     /// Create a new sync db instance
@@ -183,20 +105,122 @@ impl DbBase {
     /// caller to check there are no duplicates.
     pub(crate) fn new_no_check_duplicates(name: DbName,
                                           sig_level: SignatureLevel,
-                                          path: PathBuf) -> DbBase {
+                                          database_path: impl AsRef<Path>,
+                                          database_extension: impl AsRef<str>) -> DbBase {
+        let path = name.path(database_path, database_extension);
         DbBase {
             name,
             sig_level,
             usage: DbUsage::ALL,
             servers: RefCell::new(HashSet::new()),
             path,
+            package_cache: RefCell::new(HashMap::new()),
         }
     }
 
     /// Get the name of the database
     #[inline]
-    pub(crate) fn name(&self) -> &DbName {
+    pub fn name(&self) -> &DbName {
         &self.name
+    }
+
+    /// Is this database a local database
+    #[inline]
+    pub fn is_local(&self) -> bool {
+        self.name.is_local()
+    }
+
+    /// Is this database a sync database
+    #[inline]
+    pub fn is_sync(&self) -> bool {
+        self.name.is_sync()
+    }
+
+    /// Get the path of this database.
+    #[inline]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Get the registered servers for this database.
+    #[inline]
+    pub fn servers<'a>(&'a self) -> cell::Ref<'a, HashSet<Url>> {
+        self.servers.borrow()
+    }
+
+    /// Add server
+    pub fn add_server<'a>(&self, url: impl Into<UrlOrStr<'a>>) -> Result<(), Error>
+    {
+        // Convert to url
+        let mut url = UrlOrStr::from(url).into_url()
+            .context(ErrorKind::CannotAddServerToDatabase {
+                url: format!("{}", s),
+                database: self.base.name().to_owned(),
+            })?;
+        // Check db is sync
+        if self.is_local() {
+            return Err(err_msg("cannot add a server to a local database")
+                .context(ErrorKind::CannotAddServerToDatabase {
+                    url: format!("{}", url),
+                    database: self.base.name().to_owned(),
+                }).into());
+        }
+        // Check last char is a '/', otherwise we'll lose part of it when we add the database name
+        match url.path().chars().next_back() {
+            Some('/') => (),
+            _ => {
+                let mut path = url.path().to_owned();
+                path.push('/');
+                url.set_path(&path);
+            },
+        };
+        debug!(r#"adding server with url "{}" from database "{}"."#, url, self.base.name);
+        if ! self.base.servers.borrow_mut().insert(url.clone()) {
+            warn!(r#"server with url "{}" was already present in database "{}"."#,
+                  url, self.base.name);
+        }
+        Ok(())
+    }
+
+    /// Remove the server with the given url, if present
+    pub fn remove_server<'a>(&mut self, url: impl Into<UrlOrStr<'a>>) -> Result<(), Error> {
+        let mut url = UrlOrStr::from(url).into_url()
+            .context(ErrorKind::CannotAddServerToDatabase {
+                url: format!("{}", s),
+                database: self.base.name().to_owned(),
+            })?;
+        debug!(r#"removing server with url "{}" from database "{}"."#,
+               url, self.base.name);
+
+        if ! self.base.servers.borrow_mut().remove(&url) {
+            warn!(r#"server with url "{}" was not present in database "{}"."#,
+                  url, self.base.name);
+        }
+        Ok(())
+    }
+
+    /// Remove all servers from this database.
+    pub fn clear_servers(&mut self) {
+        debug!(r#"removing all servers from database "{}"."#, self.base.name);
+        self.base.servers.borrow_mut().clear()
+    }
+
+    /// Gets the database status
+    pub fn status(&self) -> Result<DbStatus, Error> {
+        // alpm checks path name, but we do this during construction.
+
+        // check if database is missing
+        let metadata = match fs::metadata(&self.path) {
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound =>
+                return Ok(DbStatus::Missing),
+            Err(e) =>
+                return Err(e.context(ErrorKind::CannotQueryDatabase(
+                    self.name.to_owned()
+                )).into()),
+            Ok(md) => md
+        };
+
+        self.is_valid(metadata).map(|valid| DbStatus::Exists { valid })
     }
 
     /// Validate the database.
@@ -206,9 +230,7 @@ impl DbBase {
     ///  - `path` the path of the database root
     ///
     /// Returns true if the database is valid, false otherwise
-    fn is_valid(&self, md: fs::Metadata, path: impl Deref<Target=Path>)
-        -> Result<bool, Error>
-    {
+    fn is_valid(&self, md: fs::Metadata) -> Result<bool, Error> {
 
         #[inline]
         fn create_version_file(path: &Path) -> io::Result<()> {
@@ -222,7 +244,7 @@ impl DbBase {
             if ! md.is_dir() {
                 return Ok(false);
             }
-            let version_path = path.join(LOCAL_DB_VERSION_FILE);
+            let version_path = self.path.join(LOCAL_DB_VERSION_FILE);
             Ok(match fs::read(&version_path) {
                 Ok(version_raw) => {
                     // Check version is up to date.
@@ -235,7 +257,7 @@ impl DbBase {
                 },
                 Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                     // check directory is empty and create version file
-                    let mut read_dir = fs::read_dir(&path.deref())
+                    let mut read_dir = fs::read_dir(&self.path)
                         .context(ErrorKind::DatabaseVersion(self.name.to_owned()))?;
                     match read_dir.next() {
                         Some(_) => false,
@@ -259,10 +281,88 @@ impl DbBase {
         }
     }
 
-    /// The path of this database
-    fn path(&self) -> &Path
-    {
-        &self.path
+    /// Synchronize this database with the remote servers.
+    pub fn update(&self, mut force: bool) -> Result<(), Error> {
+        use reqwest::header::IfModifiedSince;
+        use reqwest::StatusCode;
+
+        let name = match self.name {
+            DbName(DbNameInner::Local) => {
+                warn!("Updating the local database does nothing");
+                return Ok(());
+            },
+            DbName(DbNameInner::Sync(ref name)) => name
+        };
+        debug!(r#"Updating remote database "{}"."#, name);
+        // Force a reload when the db is invalid.
+        match self.status()? {
+            DbStatus::Exists { valid: true } => (),
+            _ => {
+                force = true;
+            }
+        };
+        // todo this isn't how arch works - it gets the last update time from inside the db
+        // somehow
+        let modified = fs::metadata(self.path())
+            .and_then(|md| md.modified())
+            .ok();
+
+        for server in self.servers.borrow().iter() {
+            let filename = self.name.filename(self.handle.borrow().database_extension());
+            let url = server.join(&filename).unwrap();
+            debug!("Requesting update from {}", url);
+            let mut request = handle.borrow().http_client.get(url);
+            if let Some(modified) = modified {
+                debug!("Database last updated at {:?}", modified);
+                if ! force {
+                    request.header(IfModifiedSince(modified.into()));
+                }
+            }
+            let mut response = request.send().context(ErrorKind::UnexpectedReqwest)?;
+            match response.status() {
+                StatusCode::NotModified => {
+                    // We're done
+                    debug!("Server reports db not modified - finishing update.");
+                    return Ok(());
+                },
+                StatusCode::Ok => (),
+                code => {
+                    warn!("Unexpected code {} while updating database {} - bailing",
+                          code, self.name());
+                    return Ok(());
+                }
+            }
+            let mut db_file_opts = fs::OpenOptions::new();
+            db_file_opts.write(true)
+                .truncate(true);
+            let mut db_file = db_file_opts.open(self.path())?;
+            match db_file.try_lock_exclusive() {
+                Ok(_) => Ok(()),
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    warn!("database {} is in use, blocking on request for exclusive access",
+                          self.name());
+                    db_file.lock_exclusive()
+                },
+                Err(e) => Err(e)
+            }?;
+            let len = response.copy_to(&mut db_file).context(ErrorKind::UnexpectedReqwest)?;
+            debug!("Wrote {} bytes to db file {}", len, self.path().display());
+        }
+        Ok(())
+    }
+
+    /// Populate the package cache
+    ///
+    /// It is up to the caller to check that this database is local.
+    fn populate_local(&self) -> Result<(), Error> {
+        debug_assert!(self.is_local());
+        for entry in fs::read_dir(self.path())? {
+            let md = entry.metadata()?;
+            if ! md.is_directory() {
+                continue;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -318,6 +418,23 @@ impl DbName {
     #[inline]
     pub fn is_sync(&self) -> bool {
         !self.is_local()
+    }
+
+    /// The filename of the database on disk
+    ///
+    /// This appends .db for sync databases, but not for local.
+    fn filename(&self, ext: impl AsRef<str>) -> Cow<'static, str> {
+        let ext = ext.as_ref();
+        match &self.0 {
+            &DbNameInner::Local => Cow::Borrowed(LOCAL_DB_NAME),
+            &DbNameInner::Sync(ref name) => {
+                let mut buf = String::with_capacity(name.len() + ext.len() + 1);
+                buf.push_str(name);
+                buf.push_str(".");
+                buf.push_str(ext);
+                Cow::Owned(buf)
+            }
+        }
     }
 
     /// Get the path for this database name
@@ -476,6 +593,15 @@ pub enum UrlOrStr<'a> {
     Str(&'a str),
 }
 
+impl<'a> UrlOrStr<'a> {
+    fn into_url(self) -> Result<Url, impl Fail> {
+        match self {
+            Url(url) => Ok(url),
+            Str(ref s) => s.parse(),
+        }.context(format_err!(r#""{}" is not a valid url"#, s))
+    }
+}
+
 impl From<Url> for UrlOrStr<'static> {
     fn from(url: Url) -> UrlOrStr<'static> {
         UrlOrStr::Url(url)
@@ -485,6 +611,12 @@ impl From<Url> for UrlOrStr<'static> {
 impl<'a> From<&'a str> for UrlOrStr<'a> {
     fn from(s: &'a str) -> UrlOrStr<'a> {
         UrlOrStr::Str(s)
+    }
+}
+
+impl<'a> From<&'a String> for UrlOrStr<'a> {
+    fn from(s: &'a String) -> UrlOrStr<'a> {
+        UrlOrStr::Str(s.as_ref())
     }
 }
 

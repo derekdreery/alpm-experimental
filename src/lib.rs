@@ -13,7 +13,7 @@ extern crate chrono;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
-//extern crate fs2;
+extern crate fs2;
 extern crate gpgme;
 extern crate itertools;
 extern crate lockfile;
@@ -28,13 +28,15 @@ extern crate serde_derive;
 extern crate tempfile;
 #[cfg(not(windows))]
 extern crate uname;
+extern crate spin;
 
-pub mod alpm_desc;
 mod error;
 mod signing;
 mod util;
 
+pub mod alpm_desc;
 pub mod db;
+pub mod package;
 
 pub use error::{Error, ErrorKind};
 
@@ -49,6 +51,8 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::ops::Deref;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// The name of the lockfile (hard-coded).
 pub const LOCKFILE: &str = "db.lck";
@@ -59,9 +63,14 @@ pub const SYNC_DB_DIR: &str = "sync";
 /// The extension of the directory for sync databases.
 const DEFAULT_SYNC_DB_EXT: &str = "db";
 
+/// The main alpm object that owns the system handle.
+pub struct Alpm {
+    handle: Rc<RefCell<Handle>>,
+}
+
 /// Handle to an alpm instance. Uses a lockfile to prevent concurrent access to the
 /// same db.
-pub struct Alpm {
+struct Handle {
     /// The local package database
     local_database: DbBase,
     /// A list of all sync databases
@@ -134,10 +143,10 @@ impl Alpm {
     /// Register a new sync database
     ///
     /// The name must not match `LOCAL_DB_NAME`.
-    pub fn register_sync_database<'a>(
-        &'a mut self,
+    pub fn register_sync_database(
+        &mut self,
         name: impl AsRef<str>,
-    ) -> Result<Db<'a>, Error> {
+    ) -> Result<Db, Error> {
         let name = DbName::new(name.as_ref())?;
         if self.sync_databases.contains_key(&name) {
             warn!(r#"database "{}" already registered"#, name);
@@ -150,7 +159,7 @@ impl Alpm {
 
     /// Are there any databases already registered with the given name
     pub fn database_exists(&self, name: &DbName) -> bool {
-        self.sync_databases.contains_key(name)
+        self.handle.borrow().sync_databases.contains_key(name)
     }
 
     /// Unregister a sync database.
@@ -167,12 +176,12 @@ impl Alpm {
     }
 
     /// Get the local database for this alpm instance.
-    pub fn local_database<'a>(&'a self) -> Db<'a> {
+    pub fn local_database(&self) -> Db {
         Db::new(&self.local_database, self)
     }
 
     /// Get a sync database with the given name for this alpm instance.
-    pub fn sync_database<'a>(&'a self, name: impl AsRef<str>) -> Result<Db<'a>, Error> {
+    pub fn sync_database<'a>(&'a self, name: impl AsRef<str>) -> Result<Db, Error> {
         let name = DbName::new(name)?;
         self.sync_databases.get(&name)
             .map(|db| Db::new(db, self))
@@ -321,12 +330,12 @@ impl AlpmBuilder {
 
         signing::init(&gpg_path)?;
 
-        let alpm = Alpm {
+        let handle = Handle {
             local_database: DbBase::new_no_check_duplicates(
                 DbName::LOCAL.clone(),
                 SignatureLevel::Inherit,
-                // we have to do the path because we don't have an Alpm yet.
-                (DbName::LOCAL).path(&database_path, &database_extension),
+                &database_path,
+                &database_extension
             ),
             sync_databases: HashMap::new(),
             root_path,
@@ -347,6 +356,8 @@ impl AlpmBuilder {
             check_space: true,
             http_client: reqwest::Client::new(),
         };
-        Ok(alpm)
+        Ok(Alpm {
+            handle: Rc::new(RefCell::new(handle))
+        })
     }
 }

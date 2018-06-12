@@ -29,6 +29,7 @@ fn main() -> Result<(), Error> {
         .filter_level(LevelFilter::Debug)
         .filter_module("tokio_reactor", LevelFilter::Warn)
         .filter_module("tokio_core", LevelFilter::Warn)
+        .filter_module("hyper", LevelFilter::Warn)
         .init();
 
 
@@ -40,16 +41,23 @@ fn main() -> Result<(), Error> {
     println!("local db status: {:?}", local_db.status()?);
 
     let core = alpm.register_sync_database("core")?;
-    core.add_server("http://mirrors.manchester.m247.com/arch-linux/core/os/x86_64")?;
+    core.add_server(&server_url("core", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
 
     let extra = alpm.register_sync_database("extra")?;
-    extra.add_server("http://mirrors.manchester.m247.com/arch-linux/extra/os/x86_64")?;
+    extra.add_server(&server_url("extra", "x86_64"))?;
     let community = alpm.register_sync_database("community")?;
-    community.add_server("http://mirrors.manchester.m247.com/arch-linux/community/os/x86_64")?;
+    community.add_server(&server_url("community", "x86_64"))?;
     let multilib = alpm.register_sync_database("multilib")?;
-    multilib.add_server("http://mirrors.manchester.m247.com/arch-linux/multilib/os/x86_64")?;
+    multilib.add_server(&server_url("multilib", "x86_64"))?;
+
+    let mut core = alpm.sync_database("core")?;
+    core.update(false)?;
     Ok(())
+}
+
+fn server_url(database: impl AsRef<str>, os: impl AsRef<str>) -> String {
+    format!("http://mirror.bytemark.co.uk/archlinux/{}/os/{}", database.as_ref(), os.as_ref())
 }
 
 /// Make a directory with a base installation at /tmp/alpm-test

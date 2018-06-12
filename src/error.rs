@@ -1,5 +1,6 @@
 use failure::{Backtrace, Context, Fail};
 use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use db::DbName;
@@ -85,6 +86,9 @@ pub enum ErrorKind {
     /// There was an unexpected i/o error
     #[fail(display = "there was an unexpected i/o error")]
     UnexpectedIo,
+    /// There was an unexpected reqwest error
+    #[fail(display = "there was an unexpected reqwest error")]
+    UnexpectedReqwest,
 }
 
 impl ErrorKind {}
@@ -122,5 +126,11 @@ impl From<ErrorKind> for Error {
 impl From<Context<ErrorKind>> for Error {
     fn from(inner: Context<ErrorKind>) -> Self {
         Error { inner }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(cause: io::Error) -> Self {
+        cause.context(ErrorKind::UnexpectedIo).into()
     }
 }

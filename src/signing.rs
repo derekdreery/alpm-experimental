@@ -1,8 +1,10 @@
-use chrono::NaiveDateTime;
-use failure::ResultExt;
-use gpgme::{self, Protocol};
+// todo I need to think more about whether we can just use types from gpgme more.
+use failure::{err_msg, ResultExt, Fail};
+use gpgme::{self, Protocol, KeyAlgorithm};
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use error::{Error, ErrorKind};
 use Alpm;
@@ -28,11 +30,11 @@ struct GpgKey {
     uid: String,
     name: String,
     email: String,
-    created: NaiveDateTime,
-    expires: NaiveDateTime,
+    created: SystemTime,
+    expires: SystemTime,
     length: usize,
     revoked: bool,
-    algorithm: u8,
+    algorithm: KeyAlgorithm,
 }
 
 struct SigResult {
@@ -67,6 +69,7 @@ pub fn init(gpg_directory: impl AsRef<Path>) -> Result<(), Error> {
     gpg_handle.check_engine_version(Protocol::OpenPgp)
         .context(ErrorKind::Gpgme)?;
     // Set protocol, path, and home dir
+    // We need this to keep the type checker happy.
     let none_type_helper: Option<String> = None;
     gpg_handle.set_engine_info(Protocol::OpenPgp, none_type_helper, Some(gpg_directory_str))
         .context(ErrorKind::Gpgme)?;
@@ -87,19 +90,102 @@ pub fn init(gpg_directory: impl AsRef<Path>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Check the signature of a file
-fn check_signature(path: &Path, signature: &[u8]) -> Result<(), Error> {
+/// Takes the path to a file and a detached signature, and returns a `gpgme::VerificationResult`,
+/// a list of found signatures (with some extra context).
+///
+/// If the signature is not supplied it is assumed to be with the file with a ".sig" suffix.
+fn verify_signatures<T>(path: &Path, signature: Option<&T>)
+    -> Result<Vec<GpgKey>, Error>
+where
+    T: AsRef<[u8]> + ?Sized
+{
     let path_str = path.to_string_lossy().into_owned();
     if ! path.is_file() {
         let path_str = path.to_string_lossy().into_owned();
         return Err(format_err!(r#""{}" is not a file"#, path_str)
             .context(ErrorKind::UnexpectedSignature(path_str)).into());
     }
+    let mut gpg_ctx = gpgme::Context::from_protocol(Protocol::OpenPgp)
+        .context(ErrorKind::UnexpectedSignature(path_str.clone()))?;
     let file = File::open(path)
         .context(ErrorKind::UnexpectedSignature(path_str.clone()))?;
-    let gpg_ctx = gpgme::Context::from_protocol(Protocol::OpenPgp)
+    // todo add error context when gpgme releases next version.
+    let data = match gpgme::Data::from_seekable_reader(file) {
+        Ok(d) => d,
+        Err(_) => return Err(ErrorKind::UnexpectedSignature(path_str.clone()).into()),
+    };
+    let signature = match signature {
+        Some(ref buf) => gpgme::Data::from_buffer(buf)
+            .context(ErrorKind::UnexpectedSignature(path_str.clone()))?,
+        None => {
+            // we already know we have a file
+            let file_path = path.file_name().unwrap();
+            let mut sig_file_path = OsString::with_capacity(file_path.len() + SIG_EXTENSION.len());
+            sig_file_path.push(file_path);
+            sig_file_path.push(SIG_EXTENSION);
+            let sig_path = path.with_file_name(sig_file_path);
+            let sig_file = File::open(sig_path)
+                .context(ErrorKind::UnexpectedSignature(path_str.clone()))?;
+            match gpgme::Data::from_seekable_reader(sig_file) {
+                Ok(d) => d,
+                Err(_) => return Err(ErrorKind::UnexpectedSignature(path_str.clone()).into()),
+            }
+        },
+    };
+    let result = gpg_ctx.verify_detached(signature, data)
         .context(ErrorKind::UnexpectedSignature(path_str.clone()))?;
-    let data = gpgme::Data::from_seekable_reader(file)
-        .context(ErrorKind::UnexpectedSignature(path_str.clone()))?;
-    Ok(())
+    result.signatures().enumerate().map(|(idx, sig)| {
+        debug!("-- signature {} --", idx);
+        debug!("summary: {:?}", sig.summary());
+        match sig.status() {
+            Ok(_) => debug!("status: good"),
+            Err(e) => debug!("status: {}", e),
+        };
+        if let Some(created) = sig.creation_time() {
+            debug!("created: {:?}", created);
+            if created > SystemTime::now() {
+                warn!("key timestamp for created at is in the future");
+            }
+        } else {
+            warn!("no creation timestamp in key");
+        }
+        if let Some(expires) = sig.expiration_time() {
+            debug!("expires: {:?}", expires);
+        } else {
+            debug!("expires: never");
+        }
+        debug!("validity: {}", sig.validity());
+        if let Some(reason) = sig.nonvalidity_reason() {
+            debug!("nonvalidity reason: {}", reason);
+        }
+        Ok(match sig.key() {
+            Some(key) => {
+                let fingerprint = key.fingerprint().or_else(|e| match e {
+                    Some(err) => Err(err.context(ErrorKind::UnexpectedSignature(path_str.clone()))),
+                    None => sig.fingerprint().map_err(|e| match e {
+                        Some(err) => err.context(ErrorKind::UnexpectedSignature(path_str.clone())),
+                        None => err_msg("fingerprint not found!")
+                            .context(ErrorKind::UnexpectedSignature(path_str.clone()))
+                    })
+                })?;
+                debug!("fingerprint: {:?}", fingerprint);
+                // todo I'm getting bored of error handling
+                let user = key.user_ids().next().unwrap();
+                GpgKey {
+                    fingerprint: fingerprint.to_owned(),
+                    uid: user.id().unwrap().to_owned(),
+                    name: user.name().unwrap().to_owned(),
+                    email: user.email().unwrap().to_owned(),
+                    created: sig.creation_time().unwrap(),
+                    expires: sig.expiration_time().unwrap(),
+                    length: 0,
+                    revoked: user.is_revoked(),
+                    algorithm: sig.key_algorithm(),
+                }
+            },
+            None => {
+                unimplemented!()
+            }
+        })
+    }).collect()
 }
