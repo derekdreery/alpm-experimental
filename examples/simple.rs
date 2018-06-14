@@ -7,11 +7,14 @@ compile_error!("This example is unix only");
 
 extern crate alpm;
 extern crate env_logger;
+extern crate failure;
 extern crate log;
 extern crate users;
 
 use alpm::{Alpm, Error, Database};
+use failure::Fail;
 use log::LevelFilter;
+
 
 use std::fs;
 use std::path::Path;
@@ -19,7 +22,42 @@ use std::process::Command;
 
 const BASE_PATH: &str = "/tmp/alpm-test";
 
-fn main() -> Result<(), Error> {
+fn run() -> Result<(), Error> {
+    let mut alpm = Alpm::new()
+        .with_root_path(BASE_PATH)
+        .build()?;
+
+    alpm.register_sync_database("core")?;
+    alpm.register_sync_database("extra")?;
+    alpm.register_sync_database("community")?;
+    alpm.register_sync_database("multilib")?;
+
+    let local_db = alpm.local_database();
+    println!("local db status: {:?}", local_db.status()?);
+    for package in local_db.packages().values().filter(|pkg| pkg.reason.is_none()) {
+        println!("{}", package.name);
+    }
+
+    let mut core = alpm.sync_database("core")?;
+    core.add_server(server_url("core", "x86_64"))?;
+    println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
+    core.synchronize(false)?;
+
+    let mut extra = alpm.sync_database("extra")?;
+    extra.add_server(server_url("extra", "x86_64"))?;
+    println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
+    extra.synchronize(false)?;
+
+    /*
+    extra.add_server(&server_url("extra", "x86_64"))?;
+    community.add_server(&server_url("community", "x86_64"))?;
+    multilib.add_server(&server_url("multilib", "x86_64"))?;
+    */
+
+    Ok(())
+}
+
+fn main() {
     // Make a temporary archlinux installation.
     make_base();
 
@@ -32,33 +70,26 @@ fn main() -> Result<(), Error> {
         .filter_module("hyper", LevelFilter::Warn)
         .init();
 
-
-    let mut alpm = Alpm::new()
-        .with_root_path(BASE_PATH)
-        .build()?;
-
-    alpm.register_sync_database("core")?;
-    alpm.register_sync_database("extra")?;
-    alpm.register_sync_database("community")?;
-    alpm.register_sync_database("multilib")?;
-
-    let local_db = alpm.local_database();
-    println!("local db status: {:?}", local_db.status()?);
-
-    let mut core = alpm.sync_database("core")?;
-    core.add_server(server_url("core", "x86_64"))?;
-    println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
-    core.synchronize(false)?;
-
-    /*
-    extra.add_server(&server_url("extra", "x86_64"))?;
-    community.add_server(&server_url("community", "x86_64"))?;
-    multilib.add_server(&server_url("multilib", "x86_64"))?;
-    */
-
-    Ok(())
+    if let Err(e) = run() {
+        let mut causes = e.causes();
+        println!("-- Error --");
+        let first = causes.next().unwrap();
+        println!("{}", first);
+        let mut backtrace = first.backtrace();
+        for cause in causes {
+            println!("  caused by: {}", cause);
+            if let Some(bt) = cause.backtrace() {
+                backtrace = Some(bt);
+            }
+        }
+        if let Some(bt) = backtrace {
+            println!("-- Backtrace --");
+            println!("{}", bt);
+        }
+    }
 }
 
+/// Just makes a valid server url for given database/os.
 fn server_url(database: impl AsRef<str>, os: impl AsRef<str>) -> String {
     format!("http://mirror.bytemark.co.uk/archlinux/{}/os/{}", database.as_ref(), os.as_ref())
 }

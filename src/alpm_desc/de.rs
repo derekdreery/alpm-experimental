@@ -14,7 +14,8 @@
 
 pub use super::de_error::{Error, ErrorKind, Result};
 
-use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visitor};
+use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visitor,
+    IntoDeserializer};
 
 use std::fmt;
 use std::str::FromStr;
@@ -116,133 +117,133 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("any").into())
     }
     fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("bool").into())
     }
     fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("i8").into())
     }
     fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("i16").into())
     }
     fn deserialize_i32<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("i32").into())
     }
     fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("i64").into())
     }
     fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("u8").into())
     }
     fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("u16").into())
     }
     fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("u32").into())
     }
     fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("u64").into())
     }
     fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("f32").into())
     }
     fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("f64").into())
     }
     fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("char").into())
     }
     fn deserialize_str<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("str").into())
     }
     fn deserialize_string<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("String").into())
     }
     fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("&[u8]").into())
     }
     fn deserialize_byte_buf<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("Vec<u8>").into())
     }
     fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("Option").into())
     }
     fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("()").into())
     }
     fn deserialize_unit_struct<V>(
         self,
@@ -271,7 +272,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("seq").into())
     }
 
     fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value>
@@ -279,7 +280,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("(,)").into())
     }
 
     fn deserialize_tuple_struct<V>(
@@ -292,7 +293,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("TupleStruct(..)").into())
     }
 
     fn deserialize_map<V>(mut self, visitor: V) -> Result<V::Value>
@@ -315,7 +316,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         for (idx, item) in fields.iter().enumerate() {
             for item2 in fields.iter().skip(idx + 1) {
                 if item.eq_ignore_ascii_case(item2) {
-                    return Err(ErrorKind::Unsupported.into());
+                    return Err(ErrorKind::Unsupported("same case").into());
                 }
             }
         }
@@ -332,7 +333,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         // can only deserialize structures at root
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("enum").into())
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
@@ -346,7 +347,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        self.deserialize_any(visitor)
+        visitor.visit_unit()
     }
 }
 
@@ -427,12 +428,12 @@ impl<'de> DeserializerInner<'de> {
 
 impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
     type Error = Error;
-    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        // we cannot guess the type
-        Err(ErrorKind::Unsupported.into())
+        // we cannot guess the type, so use string
+        visitor.visit_borrowed_str(self.input)
     }
 
     fn deserialize_bool<V>(mut self, visitor: V) -> Result<V::Value>
@@ -603,7 +604,7 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
         if self.allow_list {
             visitor.visit_seq(AlpmSeq::new(&mut self))
         } else {
-            Err(ErrorKind::Unsupported.into())
+            Err(ErrorKind::Unsupported("seq").into())
         }
     }
 
@@ -631,7 +632,7 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
         V: Visitor<'de>,
     {
         // only unkeyed lists are supported
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("map").into())
     }
 
     fn deserialize_struct<V>(
@@ -644,20 +645,20 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
         V: Visitor<'de>,
     {
         // only unkeyed lists are supported
-        Err(ErrorKind::Unsupported.into())
+        Err(ErrorKind::Unsupported("struct").into())
     }
 
     fn deserialize_enum<V>(
         self,
         _name: &'static str,
         _variants: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        // Enums are not supported
-        Err(ErrorKind::Unsupported.into())
+        // Only support unit variants
+        visitor.visit_enum(self.input.into_deserializer())
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
@@ -671,7 +672,7 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
     where
         V: Visitor<'de>,
     {
-        self.deserialize_any(visitor)
+        visitor.visit_unit()
     }
 }
 

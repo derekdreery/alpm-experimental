@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::cell::RefCell;
 
 use atoi::atoi;
-use failure::Fail;
+use failure::{Fail, ResultExt};
 
+use alpm_desc::de;
 use error::{ErrorKind, Error};
 use package::Package;
 use db::{LOCAL_DB_NAME, Database, SignatureLevel, DbStatus, DbUsage};
@@ -24,21 +25,24 @@ pub struct LocalDatabase {
     /// The database path.
     path: PathBuf,
     /// The package cache (HashMap of package name to package)
-    package_cache: RefCell<HashMap<String, Package>>,
+    package_cache: HashMap<String, Package>,
 }
 
 impl LocalDatabase {
 
     /// Helper to create a new database
-    pub(crate) fn new(mut path: PathBuf, sig_level: SignatureLevel) -> LocalDatabase {
+    pub(crate) fn new(mut path: PathBuf, sig_level: SignatureLevel) -> Result<LocalDatabase, Error>
+    {
         //  path is `$db_path SEP $local_db_name` for local
         path.push(LOCAL_DB_NAME);
-        LocalDatabase {
+        let mut db = LocalDatabase {
             sig_level,
             usage: DbUsage::default(),
             path,
-            package_cache: RefCell::new(HashMap::new()),
-        }
+            package_cache: HashMap::new(),
+        };
+        db.populate()?;
+        Ok(db)
     }
 
     /// Helper to create a new version file for the local database.
@@ -54,13 +58,24 @@ impl LocalDatabase {
     /// Populate the package cache
     ///
     /// It is up to the caller to check that this database is local.
-    fn populate(&self) -> Result<(), Error> {
+    fn populate(&mut self) -> Result<(), Error> {
         for entry in fs::read_dir(self.path())? {
             let entry = entry?;
             let md = entry.metadata()?;
             if ! md.is_dir() {
                 continue;
             }
+            let path = entry.path();
+            let file_name = entry.file_name().into_string()
+                .expect("non-utf8 package names not supported");
+            // Split on the second '-' from the end.
+            let (name, version) = split_package_dirname(&file_name)
+                .ok_or(ErrorKind::InvalidLocalPackage(file_name.to_owned()))?;
+            debug!("Processing package {}, version: {}", name, version);
+            let package_raw = fs::read_to_string(path.join("desc"))?;
+            let package: Package = de::from_str(&package_raw)
+                .context(ErrorKind::InvalidLocalPackage(file_name.to_owned()))?;
+            self.package_cache.insert(name.to_owned(), package);
         }
         Ok(())
     }
@@ -148,7 +163,18 @@ impl Database for LocalDatabase {
 
     /// Get the packages in this database
     fn packages(&self) -> &HashMap<String, Package> {
-        unimplemented!();
+        &self.package_cache
     }
 }
 
+/// If the name has at least 2 hyphens ('-'), split at the second from last
+fn split_package_dirname(input: &str) -> Option<(&str, &str)> {
+    let idx = input.rmatch_indices('-').skip(1).next()?.0;
+    let start2 = idx + '-'.len_utf8();
+    Some((&input[0..idx], &input[start2..]))
+}
+
+#[test]
+fn test_split_package_dirname() {
+    assert_eq!(split_package_dirname("abc-1223123-34"), Some(("abc", "1223123-34")));
+}

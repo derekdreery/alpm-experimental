@@ -116,26 +116,13 @@ impl Default for SignatureLevel {
 mod tests {
     use super::*;
 
-    #[test]
-    fn db_name() {
-        assert_eq!(
-            SyncDbName::new("name_of_db").unwrap(),
-            SyncDbName(SyncDbNameInner::Sync("name_of_db".into()))
-        );
-        assert_eq!(&SyncDbName::new("local").unwrap(), SyncDbName::LOCAL);
-        assert!(SyncDbName::new("bad/name").is_err());
-        assert!(SyncDbName::new("bad\\name").is_err());
-        assert!(SyncDbName::new("bad.name").is_err());
-    }
-
-    #[test]
+    #[test(ignore)]
     fn db_path() {
         let base_path = "/var/lib/pacman/";
         let base_path2 = "/var/lib/pacman";
         let ext = "db";
 
         let tests = vec![
-            ("local", "/var/lib/pacman/local"),
             ("sync1", "/var/lib/pacman/sync/sync1.db"),
         ];
         for (db_name, target) in tests {

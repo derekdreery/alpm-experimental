@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use std::io;
 use std::result::Result as StdResult;
 
-use failure::Context;
+use failure::{Fail, Context, Compat};
 use serde::{de, ser};
 
 /// The error type for deserialization
@@ -13,11 +13,11 @@ pub struct Error {
 }
 
 /// Errors that can occur during deserialization.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
 pub enum ErrorKind {
     /// This format does not support the given operation
-    #[fail(display = "tried to serialize an unsupported type/context")]
-    Unsupported,
+    #[fail(display = "tried to deserialize an unsupported type/context: {}", _0)]
+    Unsupported(&'static str),
     /// The deserializer expected a bool
     #[fail(display = "expected a bool")]
     ExpectedBool,
@@ -43,14 +43,14 @@ pub enum ErrorKind {
     #[fail(display = "expected an empty string")]
     ExpectedEmpty,
     /// A Serialize method returned a custom error.
-    #[fail(display = "the type being serialized reported an error")]
-    Custom,
+    #[fail(display = "the type being deserialized reported an error: {}", _0)]
+    Custom(String),
 }
 
 impl Error {
     /// Get the kind of this error
-    pub fn kind(&self) -> ErrorKind {
-        *self.inner.get_context()
+    pub fn kind(&self) -> &ErrorKind {
+        self.inner.get_context()
     }
 
     /// Get a version of this error that implements `Fail`.
@@ -94,6 +94,9 @@ impl ::std::error::Error for Error {
     }
 
     fn cause(&self) -> Option<&::std::error::Error> {
+        let cause = self.inner.cause()?;
+        // we can't return this, so dump out some info
+        eprintln!("  caused by: {}", cause);
         None
     }
 }
@@ -103,7 +106,7 @@ impl de::Error for Error {
         where
             T: Display,
     {
-        format_err!("{}", msg).context(ErrorKind::Custom).into()
+        ErrorKind::Custom(format!("{}", msg)).into()
     }
 }
 

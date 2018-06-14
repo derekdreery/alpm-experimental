@@ -356,7 +356,7 @@ impl AlpmBuilder {
 
         signing::init(&gpg_path)?;
 
-        let local_database = LocalDatabase::new(database_path.clone(), SignatureLevel::default());
+        let local_database = LocalDatabase::new(database_path.clone(), SignatureLevel::default())?;
 
         let handle = Rc::new(RefCell::new(Handle {
             local_database,

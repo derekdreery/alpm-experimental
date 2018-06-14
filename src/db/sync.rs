@@ -428,3 +428,18 @@ impl cmp::PartialEq<SyncDbName> for str {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_name() {
+        assert_eq!(
+            SyncDbName::new("name_of_db").unwrap(),
+            SyncDbName("name_of_db".into())
+        );
+        assert!(SyncDbName::new("bad/name").is_err());
+        assert!(SyncDbName::new("bad\\name").is_err());
+        assert!(SyncDbName::new("bad.name").is_err());
+    }
+}
