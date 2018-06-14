@@ -10,7 +10,7 @@ extern crate env_logger;
 extern crate log;
 extern crate users;
 
-use alpm::{Alpm, Error};
+use alpm::{Alpm, Error, Database};
 use log::LevelFilter;
 
 use std::fs;
@@ -37,22 +37,25 @@ fn main() -> Result<(), Error> {
         .with_root_path(BASE_PATH)
         .build()?;
 
+    alpm.register_sync_database("core")?;
+    alpm.register_sync_database("extra")?;
+    alpm.register_sync_database("community")?;
+    alpm.register_sync_database("multilib")?;
+
     let local_db = alpm.local_database();
     println!("local db status: {:?}", local_db.status()?);
 
-    let core = alpm.register_sync_database("core")?;
-    core.add_server(&server_url("core", "x86_64"))?;
-    println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
-
-    let extra = alpm.register_sync_database("extra")?;
-    extra.add_server(&server_url("extra", "x86_64"))?;
-    let community = alpm.register_sync_database("community")?;
-    community.add_server(&server_url("community", "x86_64"))?;
-    let multilib = alpm.register_sync_database("multilib")?;
-    multilib.add_server(&server_url("multilib", "x86_64"))?;
-
     let mut core = alpm.sync_database("core")?;
-    core.update(false)?;
+    core.add_server(server_url("core", "x86_64"))?;
+    println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
+    core.synchronize(false)?;
+
+    /*
+    extra.add_server(&server_url("extra", "x86_64"))?;
+    community.add_server(&server_url("community", "x86_64"))?;
+    multilib.add_server(&server_url("multilib", "x86_64"))?;
+    */
+
     Ok(())
 }
 

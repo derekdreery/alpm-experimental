@@ -40,8 +40,8 @@ pub mod package;
 
 pub use error::{Error, ErrorKind};
 
-pub use db::Db;
-use db::{DbBase, DbName, SignatureLevel};
+pub use db::{Database, LocalDatabase, SyncDatabase};
+use db::{DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR, SyncDatabaseInner, SyncDbName, SignatureLevel};
 
 use failure::{Fail, ResultExt};
 use lockfile::Lockfile;
@@ -51,30 +51,131 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::ops::Deref;
-use std::cell::RefCell;
+use std::cell::{RefCell, Ref};
 use std::rc::Rc;
 
 /// The name of the lockfile (hard-coded).
 pub const LOCKFILE: &str = "db.lck";
-/// The name of the local database.
-pub const LOCAL_DB_NAME: &str = "local";
-/// The name of the directory for sync databases.
-pub const SYNC_DB_DIR: &str = "sync";
-/// The extension of the directory for sync databases.
-const DEFAULT_SYNC_DB_EXT: &str = "db";
 
 /// The main alpm object that owns the system handle.
 pub struct Alpm {
     handle: Rc<RefCell<Handle>>,
 }
 
-/// Handle to an alpm instance. Uses a lockfile to prevent concurrent access to the
+impl Alpm {
+    /// Create a builder for a new alpm instance.
+    ///
+    /// # Examples
+    ///
+    /// Create a new instance using the defaults
+    /// ```
+    /// # use alpm::Alpm;
+    /// let alpm = Alpm::new().build();
+    /// ```
+    ///
+    /// Create a new instance for a chroot environment
+    /// ```
+    /// # use alpm::Alpm;
+    /// let alpm = Alpm::new()
+    ///     .with_root_path("/my/chroot")
+    ///     .build();
+    /// ```
+    pub fn new() -> AlpmBuilder {
+        Default::default()
+    }
+
+    /// Register a new sync database
+    ///
+    /// The name must not match `LOCAL_DB_NAME`.
+    pub fn register_sync_database(&mut self, name: impl AsRef<str>) -> Result<(), Error> {
+        let name = SyncDbName::new(name.as_ref())?;
+        if self.handle.borrow().sync_databases.contains_key(&name) {
+            warn!(r#"database "{}" already registered"#, name);
+        } else {
+            let handle = self.handle.clone();
+            let new_db = SyncDatabaseInner::new(handle,
+                                                name.clone(),
+                                                SignatureLevel::default());
+            self.handle.borrow_mut().sync_databases.insert(name, Rc::new(RefCell::new(new_db)));
+        }
+        Ok(())
+    }
+
+    /// Are there any databases already registered with the given name
+    pub fn sync_database_exists(&self, name: impl AsRef<str>) -> bool {
+        match SyncDbName::new(name.as_ref()) {
+            Ok(name) => self.handle.borrow().sync_databases.contains_key(&name),
+            Err(_) => false
+        }
+    }
+
+    /// Unregister a sync database.
+    ///
+    /// Database is left on the filesystem and will not be touched after this is called.
+    pub fn unregister_sync_database(&mut self, name: impl AsRef<str>) {
+        let name = name.as_ref();
+        let name = match SyncDbName::new(name) {
+            Ok(name) => name,
+            Err(_) => {
+                warn!("could not unregister a database with name \"{}\" (name not valid)", name);
+                return;
+            }
+        };
+        if ! self.handle.borrow_mut().sync_databases.remove(&name).is_none() {
+            warn!("could not unregister a database with name \"{}\" (not found)", name);
+        }
+    }
+
+    pub fn unregister_all_sync_databases(&mut self) {
+        self.handle.borrow_mut().sync_databases.clear()
+    }
+
+    /// Get the local database for this alpm instance.
+    pub fn local_database<'a>(&'a self) -> impl Deref<Target=LocalDatabase> + 'a {
+        // We unwrap here because we guarantee that the local database is present to users.
+        Ref::map(self.handle.borrow(), |handle| &handle.local_database)
+    }
+
+    /// Get a sync database with the given name for this alpm instance.
+    ///
+    /// The database is only valid while the `Alpm` instance is in scope. Once it is dropped, all
+    /// calls to the database will error.
+    pub fn sync_database(&self, name: impl AsRef<str>)
+        -> Result<SyncDatabase, Error>
+    {
+        let name = name.as_ref();
+        let db_name = SyncDbName::new(name)?;
+        let db = match self.handle.borrow().sync_databases.get(&db_name) {
+            Some(handle) => Ok(handle.clone()),
+            None => Err(Error::from(ErrorKind::DatabaseNotFound(name.to_owned())))
+        }?;
+
+        let name = db_name.into();
+        let path = db.borrow().path.clone();
+        Ok(SyncDatabase::new(&db, name, path))
+    }
+
+    /// Get the parent database path
+    pub fn database_path<'a>(&'a self) -> impl AsRef<Path> + 'a {
+        util::DerefAsRef(Ref::map(self.handle.borrow(), |handle| &*handle.database_path))
+    }
+
+    /// Get the parent database path
+    pub fn database_extension<'a>(&'a self) -> impl AsRef<str> + 'a {
+        util::DerefAsRef(Ref::map(self.handle.borrow(), |handle| &*handle.database_extension))
+    }
+}
+
+/// Handle to an alpm instance. Uses a lockfile to prevent concurrent processes accessing the
 /// same db.
+#[derive(Debug)]
 struct Handle {
     /// The local package database
-    local_database: DbBase,
+    local_database: LocalDatabase,
     /// A list of all sync databases
-    sync_databases: HashMap<DbName, DbBase>,
+    ///
+    /// We can access these concurrently, as they manage their own mutability.
+    sync_databases: HashMap<SyncDbName, Rc<RefCell<SyncDatabaseInner>>>,
     /// Managed filesystem root (normally this will be "/")
     root_path: PathBuf,
     /// The path of the alpm package database
@@ -118,84 +219,10 @@ struct Handle {
     http_client: reqwest::Client,
 }
 
-impl Alpm {
-    /// Create a builder for a new alpm instance.
-    ///
-    /// # Examples
-    ///
-    /// Create a new instance using the defaults
-    /// ```
-    /// # use alpm::Alpm;
-    /// let alpm = Alpm::new().build();
-    /// ```
-    ///
-    /// Create a new instance for a chroot environment
-    /// ```
-    /// # use alpm::Alpm;
-    /// let alpm = Alpm::new()
-    ///     .with_root_path("/my/chroot")
-    ///     .build();
-    /// ```
-    pub fn new() -> AlpmBuilder {
-        Default::default()
-    }
-
-    /// Register a new sync database
-    ///
-    /// The name must not match `LOCAL_DB_NAME`.
-    pub fn register_sync_database(
-        &mut self,
-        name: impl AsRef<str>,
-    ) -> Result<Db, Error> {
-        let name = DbName::new(name.as_ref())?;
-        if self.sync_databases.contains_key(&name) {
-            warn!(r#"database "{}" already registered"#, name);
-        } else {
-            let new_db = DbBase::new_sync(name.clone(), self, SignatureLevel::default())?;
-            self.sync_databases.insert(name.clone(), new_db);
-        }
-        Ok(Db::new(self.sync_databases.get(&name).unwrap(), self))
-    }
-
+impl Handle {
     /// Are there any databases already registered with the given name
-    pub fn database_exists(&self, name: &DbName) -> bool {
-        self.handle.borrow().sync_databases.contains_key(name)
-    }
-
-    /// Unregister a sync database.
-    ///
-    /// Database is left on the filesystem and will not be touched after this is called.
-    pub fn unregister_sync_database(&mut self, name: &DbName) {
-        if ! self.sync_databases.remove(name).is_none() {
-            warn!("could not find a database with name \"{}\"", name);
-        }
-    }
-
-    pub fn unregister_all_sync_databases(&mut self) {
-        self.sync_databases.clear()
-    }
-
-    /// Get the local database for this alpm instance.
-    pub fn local_database(&self) -> Db {
-        Db::new(&self.local_database, self)
-    }
-
-    /// Get a sync database with the given name for this alpm instance.
-    pub fn sync_database<'a>(&'a self, name: impl AsRef<str>) -> Result<Db, Error> {
-        let name = DbName::new(name)?;
-        self.sync_databases.get(&name)
-            .map(|db| Db::new(db, self))
-            .ok_or(ErrorKind::DatabaseNotFound(name).into())
-    }
-
-    /// Get the parent database path
-    pub fn database_path(&self) -> &Path {
-        &self.database_path
-    }
-
-    /// Get the parent database path
-    pub fn database_extension(&self) -> &str {
-        &self.database_extension
+    fn sync_database_registered(&self, name: &SyncDbName) -> bool {
+        self.sync_databases.contains_key(&name)
     }
 }
 
@@ -274,8 +301,7 @@ impl AlpmBuilder {
         };
 
         debug!("database path: {}", database_path.display());
-        util::check_valid_directory(&database_path)
-            .context(ErrorKind::BadDatabasePath(database_path.clone()))?;
+        // todo should I be checking database_path is valid here?
 
         let database_extension = self.database_extension.unwrap_or(
             DEFAULT_SYNC_DB_EXT.to_owned());
@@ -330,13 +356,10 @@ impl AlpmBuilder {
 
         signing::init(&gpg_path)?;
 
-        let handle = Handle {
-            local_database: DbBase::new_no_check_duplicates(
-                DbName::LOCAL.clone(),
-                SignatureLevel::Inherit,
-                &database_path,
-                &database_extension
-            ),
+        let local_database = LocalDatabase::new(database_path.clone(), SignatureLevel::default());
+
+        let handle = Rc::new(RefCell::new(Handle {
+            local_database,
             sync_databases: HashMap::new(),
             root_path,
             database_path,
@@ -355,9 +378,7 @@ impl AlpmBuilder {
             delta_ratio: 0.0,
             check_space: true,
             http_client: reqwest::Client::new(),
-        };
-        Ok(Alpm {
-            handle: Rc::new(RefCell::new(handle))
-        })
+        }));
+        Ok(Alpm { handle })
     }
 }

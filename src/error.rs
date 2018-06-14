@@ -3,8 +3,6 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use db::DbName;
-
 /// The main error type for this library.
 #[derive(Debug)]
 pub struct Error {
@@ -52,25 +50,25 @@ pub enum ErrorKind {
     InvalidDatabaseName(String),
     /// A given database name already exists.
     #[fail(display = "Database with name \"{}\" already exists", _0)]
-    DatabaseAlreadyExists(DbName),
+    DatabaseAlreadyExists(String),
     /// Cannot find a database with the given name.
     #[fail(display = "Cannot find database with name \"{}\"", _0)]
-    DatabaseNotFound(DbName),
+    DatabaseNotFound(String),
     /// There was an unexpected error when creating a database.
     #[fail(display = "Could not create database \"{}\" on the filesystem.", _0)]
-    CannotCreateDatabase(DbName),
+    CannotCreateDatabase(String),
     /// Could not query database on the filesystem.
     #[fail(display = "Could not query database \"{}\" on the filesystem.", _0)]
-    CannotQueryDatabase(DbName),
+    CannotQueryDatabase(String),
     /// Failed to add server with given url to database.
     #[fail(display = "Cannot add server with url \"{}\" to database \"{}\".", url, database)]
     CannotAddServerToDatabase {
         url: String,
-        database: DbName,
+        database: String,
     },
     /// There was an error when getting/updating the database version.
     #[fail(display = "there was an unexpected error getting/updating the version for database \"{}\"", _0)]
-    DatabaseVersion(DbName),
+    DatabaseVersion(String),
     /// Error configuring gpg.
     #[fail(display = "there was an error configuring gpgme")]
     Gpgme,
@@ -83,6 +81,9 @@ pub enum ErrorKind {
     /// An unexpected error occurred during signature verification.
     #[fail(display = "an unexpected error occurred while processing a signature for \"{}\"", _0)]
     UnexpectedSignature(String),
+    /// The main handle has been dropped
+    #[fail(display = "no operations are possible after the main handle has been dropped")]
+    UseAfterDrop,
     /// There was an unexpected i/o error
     #[fail(display = "there was an unexpected i/o error")]
     UnexpectedIo,
