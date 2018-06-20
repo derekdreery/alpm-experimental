@@ -33,6 +33,9 @@ pub const DEFAULT_SYNC_DB_EXT: &str = "db";
 pub const LOCAL_DB_NAME: &str = "local";
 
 pub trait Database {
+    /// The package iterator
+    type PkgIter: Iterator<Item=Rc<Package>>;
+
     /// Get the name of this database
     fn name(&self) -> &str;
 
@@ -48,8 +51,13 @@ pub trait Database {
         Ok(())
     }
 
-    /// Get the packages in this database
-    fn packages(&self) -> &HashMap<String, Package>;
+    /// Get a package in this database
+    fn package(&self, name: &str) -> Result<Rc<Package>, Error>;
+
+    /// Get all packages in this database
+    fn packages(&self) -> Result<Self::PkgIter, Error> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]

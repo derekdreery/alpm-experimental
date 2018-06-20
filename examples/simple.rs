@@ -24,13 +24,14 @@ const BASE_PATH: &str = "/tmp/alpm-test";
 
 fn run() -> Result<(), Error> {
     let mut alpm = Alpm::new()
-        .with_root_path(BASE_PATH)
         .build()?;
 
+    /*
     alpm.register_sync_database("core")?;
     alpm.register_sync_database("extra")?;
     alpm.register_sync_database("community")?;
     alpm.register_sync_database("multilib")?;
+    */
 
     let local_db = alpm.local_database();
     println!("local db status: {:?}", local_db.status()?);
@@ -38,6 +39,7 @@ fn run() -> Result<(), Error> {
         println!("{}", package.name);
     }
 
+    /*
     let mut core = alpm.sync_database("core")?;
     core.add_server(server_url("core", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
@@ -48,7 +50,6 @@ fn run() -> Result<(), Error> {
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     extra.synchronize(false)?;
 
-    /*
     extra.add_server(&server_url("extra", "x86_64"))?;
     community.add_server(&server_url("community", "x86_64"))?;
     multilib.add_server(&server_url("multilib", "x86_64"))?;
@@ -59,7 +60,7 @@ fn run() -> Result<(), Error> {
 
 fn main() {
     // Make a temporary archlinux installation.
-    make_base();
+    //make_base();
 
     // Make logging nice
     let mut builder = env_logger::Builder::from_default_env();

@@ -94,8 +94,8 @@ impl Database for SyncDatabase {
         self.upgrade()?.borrow_mut().synchronize(force)
     }
 
-    /// Get the packages in this database
-    fn packages(&self) -> &HashMap<String, Package> {
+    /// Get a package in this database
+    fn package(&self, name: &str) -> Result<Rc<Package>, Error> {
         unimplemented!();
     }
 }

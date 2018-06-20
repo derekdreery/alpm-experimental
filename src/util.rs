@@ -1,11 +1,15 @@
+use std::cell::{RefCell, Ref};
+use std::collections::HashMap;
 use std::error;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::Path;
 use std::ops::Deref;
+use std::path::Path;
+use std::rc::Rc;
 
 use failure::Fail;
+use error::Error;
 
 use reqwest::Url;
 
@@ -120,3 +124,53 @@ impl fmt::Display for UrlOrStr {
     }
 }
 
+#[derive(Debug)]
+pub struct Cache<T> {
+    cache: RefCell<HashMap<String, Rc<T>>>,
+    got_all: RefCell<bool>
+}
+
+impl<T> Cache<T> {
+    pub fn new() -> Cache<T> {
+        Cache {
+            cache: RefCell::new(HashMap::new()),
+            got_all: RefCell::new(false),
+        }
+    }
+
+    pub fn get(&self, name: &str, getter: impl Fn(&str) -> Result<T, Error> + 'static)
+        -> Result<Rc<T>, Error>
+    {
+        let cache = self.cache.borrow();
+        if let Some(val) = cache.get(name) {
+            return Ok(val.clone());
+        }
+        let val = Rc::new(getter(name)?);
+        self.cache.borrow_mut().insert(name.to_owned(), val.clone());
+        Ok(val)
+    }
+
+    pub fn get_all<F, F2, I>(&self,
+                   get_list: F,
+                   getter: F2)
+        -> Result<Ref<HashMap<String, T>>, Error>
+    where
+        F: FnOnce() -> Result<I, Error> + 'static,
+        F2: Fn(&str) -> Result<T, Error> + 'static,
+        I: Iterator<Item=String>,
+    {
+        if self.got_all.borrow() {
+            return Ok(self.cache.borrow())
+        }
+
+        let cache = self.cache.borrow_mut();
+        for name in get_list() {
+            if ! cache.contains(name) {
+                let val = Rc::new(getter(name));
+                cache.insert(name.to_owned(), val.clone());
+            }
+        }
+        self.got_all.borrow_mut() = true;
+        Ok(self.cache.borrow())
+    }
+}
