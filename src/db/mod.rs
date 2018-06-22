@@ -12,7 +12,6 @@ use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
 
 use error::{ErrorKind, Error};
-use package::Package;
 use Handle;
 use atoi::atoi;
 use failure::{Fail, ResultExt, err_msg};
@@ -21,7 +20,7 @@ use fs2::FileExt;
 mod local;
 mod sync;
 
-pub use self::local::LocalDatabase;
+pub use self::local::{LocalDatabase, LocalDbPackage};
 pub use self::sync::SyncDatabase;
 pub(crate) use self::sync::{SyncDatabaseInner, SyncDbName};
 
@@ -32,15 +31,17 @@ pub const DEFAULT_SYNC_DB_EXT: &str = "db";
 /// The name of the local database.
 pub const LOCAL_DB_NAME: &str = "local";
 
+/*
 pub trait Database {
-    /// The package iterator
-    type PkgIter: Iterator<Item=Rc<Package>>;
+    type Pkg: Package;
+    type PkgIter: Iterator<Item=Self::Pkg>;
+    type Path: Deref<Target=Path>;
 
     /// Get the name of this database
     fn name(&self) -> &str;
 
     /// Get the path of the root file or directory for this database.
-    fn path(&self) -> &Path;
+    fn path(&self) -> Self::Path;
 
     /// Get the status of this database.
     fn status(&self) -> Result<DbStatus, Error>;
@@ -52,12 +53,17 @@ pub trait Database {
     }
 
     /// Get a package in this database
-    fn package(&self, name: &str) -> Result<Rc<Package>, Error>;
+    fn package(&self, name: &str) -> Self::Pkg;
 
     /// Get all packages in this database
-    fn packages(&self) -> Result<Self::PkgIter, Error> {
+    fn packages(&self) -> Self::PkgIter {
         unimplemented!()
     }
+}
+*/
+
+pub trait Package {
+    fn name(&self) -> &str;
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]

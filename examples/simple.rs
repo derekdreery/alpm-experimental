@@ -11,7 +11,8 @@ extern crate failure;
 extern crate log;
 extern crate users;
 
-use alpm::{Alpm, Error, Database};
+use alpm::{Alpm, Error};
+use alpm::db::LocalDbPackage as Package;
 use failure::Fail;
 use log::LevelFilter;
 
@@ -23,7 +24,8 @@ use std::process::Command;
 const BASE_PATH: &str = "/tmp/alpm-test";
 
 fn run() -> Result<(), Error> {
-    let mut alpm = Alpm::new()
+    let alpm = Alpm::new()
+        //.with_root_path(&BASE_PATH)
         .build()?;
 
     /*
@@ -33,11 +35,8 @@ fn run() -> Result<(), Error> {
     alpm.register_sync_database("multilib")?;
     */
 
-    let local_db = alpm.local_database();
-    println!("local db status: {:?}", local_db.status()?);
-    for package in local_db.packages().values().filter(|pkg| pkg.reason.is_none()) {
-        println!("{}", package.name);
-    }
+    print_packages_with_no_reason(&alpm)?;
+    print_total_package_size(&alpm)?;
 
     /*
     let mut core = alpm.sync_database("core")?;
@@ -142,4 +141,42 @@ fn run_command(mut cmd: Command) -> bool {
         eprintln!("command {:?} failed with error code {:?}", cmd, status.code());
         false
     }
+}
+
+/// Print all packages, and their disk usage, where packages have no reason field.
+fn print_packages_with_no_reason(alpm: &Alpm) -> Result<(), Error> {
+    let local_db = alpm.local_database();
+    println!("-- Packages without install reason --");
+    let mut packages = local_db.packages()
+        .map(|pkg| pkg.unwrap())
+        .filter(|pkg| pkg.reason().is_none())
+        .map(|pkg| {
+            let disk_usage = pkg.disk_usage(&*alpm.root_path())?;
+            Ok((pkg, disk_usage))
+        })
+        .collect::<Result<Vec<(Package, u64)>, Error>>()?;
+   
+    packages.sort_by_key(|&(_, usage)| usage);
+    let mut acc = 0;
+    for (pkg, usage) in packages.iter() {
+        println!("{}: {}", pkg.name(), usage);
+        acc += usage;
+    }
+    println!("Total disk space from packages without install reason: {}", acc);
+    Ok(())
+}
+
+/// Print the total disk usage of all local packages
+fn print_total_package_size(alpm: &Alpm) -> Result<(), Error> {
+    let local_db = alpm.local_database();
+    let total_usage = local_db.packages()
+        .fold(Ok(0), |acc: Result<u64, Error>, pkg| {
+            match acc {
+                Ok(val) => Ok(val + pkg?.disk_usage(&*alpm.root_path())?),
+                Err(e) => Err(e),
+            }
+        })?;
+   
+    println!("Total disk space from packages: {}", total_usage);
+    Ok(())
 }

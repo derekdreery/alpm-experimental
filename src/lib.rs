@@ -16,6 +16,9 @@ extern crate failure_derive;
 extern crate fs2;
 extern crate gpgme;
 extern crate itertools;
+#[macro_use]
+extern crate lazy_static;
+extern crate libarchive;
 extern crate lockfile;
 #[macro_use]
 extern crate log;
@@ -28,7 +31,7 @@ extern crate serde_derive;
 extern crate tempfile;
 #[cfg(not(windows))]
 extern crate uname;
-extern crate spin;
+//extern crate spin;
 
 mod error;
 mod signing;
@@ -40,7 +43,7 @@ pub mod package;
 
 pub use error::{Error, ErrorKind};
 
-pub use db::{Database, LocalDatabase, SyncDatabase};
+pub use db::{LocalDatabase, SyncDatabase};
 use db::{DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR, SyncDatabaseInner, SyncDbName, SignatureLevel};
 
 use failure::{Fail, ResultExt};
@@ -132,7 +135,6 @@ impl Alpm {
 
     /// Get the local database for this alpm instance.
     pub fn local_database<'a>(&'a self) -> impl Deref<Target=LocalDatabase> + 'a {
-        // We unwrap here because we guarantee that the local database is present to users.
         Ref::map(self.handle.borrow(), |handle| &handle.local_database)
     }
 
@@ -161,8 +163,12 @@ impl Alpm {
     }
 
     /// Get the parent database path
-    pub fn database_extension<'a>(&'a self) -> impl AsRef<str> + 'a {
-        util::DerefAsRef(Ref::map(self.handle.borrow(), |handle| &*handle.database_extension))
+    pub fn database_extension<'a>(&'a self) -> impl Deref<Target=String> + 'a {
+        Ref::map(self.handle.borrow(), |handle| &handle.database_extension)
+    }
+
+    pub fn root_path<'a>(&'a self) -> impl Deref<Target=PathBuf> + 'a {
+        Ref::map(self.handle.borrow(), |handle| &handle.root_path)
     }
 }
 
@@ -282,6 +288,7 @@ impl AlpmBuilder {
 
     /// Build the alpm instance.
     pub fn build(self) -> Result<Alpm, Error> {
+        // todo check that root path is not relative.
         #[cfg(windows)]
         let root_path = self.root_path.unwrap_or("C:\\".into());
         #[cfg(not(windows))]

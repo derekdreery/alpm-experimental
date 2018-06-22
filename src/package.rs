@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use std::collections::HashMap;
 
 use serde::de::{self, Visitor};
-
+/*
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Package {
     pub name: String,
@@ -57,3 +57,4 @@ pub enum Reason {
     #[serde(rename = "1")]
     Depend,
 }
+*/

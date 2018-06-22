@@ -11,13 +11,14 @@ failure_derive = "0.1"
 fs2 = "0.4" # we can use this in future for extra locking
 gpgme = "0.7"
 itertools = "0.7"
+lazy_static = "1"
+libarchive = { path = "../libarchive-rust" }
 lockfile = "0.2"
 log = "0.4"
 nom = "4"
 reqwest = "0.8"
 serde = "1"
 serde_derive = "1"
-spin = "0.4"
 tempfile = "3"
 atoi = "0.2"
 

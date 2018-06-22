@@ -92,6 +92,9 @@ pub enum ErrorKind {
     /// There was an unexpected reqwest error
     #[fail(display = "there was an unexpected reqwest error")]
     UnexpectedReqwest,
+    /// There was an unexpected libarchive error
+    #[fail(display = "there was an unexpected libarchive error")]
+    UnexpectedArchive,
 }
 
 impl ErrorKind {}

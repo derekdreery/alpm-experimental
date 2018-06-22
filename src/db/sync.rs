@@ -10,9 +10,8 @@ use std::ops::Deref;
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
 
-use db::{SYNC_DB_DIR, LOCAL_DB_NAME, Database, DbStatus, DbUsage, SignatureLevel};
+use db::{SYNC_DB_DIR, LOCAL_DB_NAME, DbStatus, DbUsage, SignatureLevel};
 use error::{ErrorKind, Error};
-use package::Package;
 use Handle;
 use util::UrlOrStr;
 
@@ -71,7 +70,7 @@ impl SyncDatabase {
     }
 }
 
-impl Database for SyncDatabase {
+impl SyncDatabase {
     /// Get the name of the database
     #[inline]
     fn name(&self) -> &str {
@@ -94,10 +93,12 @@ impl Database for SyncDatabase {
         self.upgrade()?.borrow_mut().synchronize(force)
     }
 
+    /*
     /// Get a package in this database
     fn package(&self, name: &str) -> Result<Rc<Package>, Error> {
         unimplemented!();
     }
+    */
 }
 
 /// A package database.
@@ -115,8 +116,8 @@ pub struct SyncDatabaseInner {
     servers: HashSet<Url>,
     /// The database path.
     pub path: PathBuf,
-    /// The package cache (HashMap of package name to package
-    package_cache: HashMap<String, Package>,
+    ///// The package cache (HashMap of package name to package
+    //package_cache: HashMap<String, Package>,
 }
 
 impl SyncDatabaseInner {
@@ -146,7 +147,7 @@ impl SyncDatabaseInner {
             usage: DbUsage::ALL,
             servers: HashSet::new(),
             path,
-            package_cache: HashMap::new(),
+            //package_cache: HashMap::new(),
         }
     }
 
@@ -315,10 +316,12 @@ impl SyncDatabaseInner {
         Ok(())
     }
 
+    /*
     /// Get the packages in this database
     fn packages(&self) -> &HashMap<String, Package> {
         unimplemented!();
     }
+    */
 
     /// Fetches an alpm handle and maps failure to an error
     fn get_handle(&self) -> Result<Rc<RefCell<Handle>>, Error> {
