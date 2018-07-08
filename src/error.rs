@@ -2,6 +2,7 @@ use failure::{Backtrace, Context, Fail};
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
+use mtree;
 
 /// The main error type for this library.
 #[derive(Debug)]
@@ -89,12 +90,12 @@ pub enum ErrorKind {
     /// There was an unexpected i/o error
     #[fail(display = "there was an unexpected i/o error")]
     UnexpectedIo,
+    /// There was an unexpected mtree parsing error
+    #[fail(display = "there was an unexpected mtree parsing error")]
+    UnexpectedMtree,
     /// There was an unexpected reqwest error
     #[fail(display = "there was an unexpected reqwest error")]
     UnexpectedReqwest,
-    /// There was an unexpected libarchive error
-    #[fail(display = "there was an unexpected libarchive error")]
-    UnexpectedArchive,
 }
 
 impl ErrorKind {}
@@ -138,5 +139,14 @@ impl From<Context<ErrorKind>> for Error {
 impl From<io::Error> for Error {
     fn from(cause: io::Error) -> Self {
         cause.context(ErrorKind::UnexpectedIo).into()
+    }
+}
+
+impl From<mtree::Error> for Error {
+    fn from(from: mtree::Error) -> Error {
+        match from {
+            mtree::Error::Io(e) => Error::from(e),
+            mtree::Error::Parser(e) => e.context(ErrorKind::UnexpectedMtree).into()
+        }
     }
 }

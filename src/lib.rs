@@ -18,7 +18,6 @@ extern crate gpgme;
 extern crate itertools;
 #[macro_use]
 extern crate lazy_static;
-extern crate libarchive;
 extern crate lockfile;
 #[macro_use]
 extern crate log;
@@ -31,7 +30,8 @@ extern crate serde_derive;
 extern crate tempfile;
 #[cfg(not(windows))]
 extern crate uname;
-//extern crate spin;
+extern crate libflate;
+extern crate mtree;
 
 mod error;
 mod signing;

@@ -6,24 +6,50 @@
 compile_error!("This example is unix only");
 
 extern crate alpm;
+#[macro_use]
+extern crate clap;
 extern crate env_logger;
 extern crate failure;
 extern crate log;
 extern crate users;
+extern crate humansize;
 
 use alpm::{Alpm, Error};
 use alpm::db::LocalDbPackage as Package;
 use failure::Fail;
 use log::LevelFilter;
+use humansize::{FileSize, file_size_opts::BINARY};
+use clap::{Arg, App, ArgMatches, AppSettings};
 
-
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 const BASE_PATH: &str = "/tmp/alpm-test";
 
-fn run() -> Result<(), Error> {
+/// Command line arguments parsed into program config.
+#[derive(Debug)]
+pub struct Opts {
+    /// How verbose should we be?
+    pub verbosity: LevelFilter,
+    /// Which subcommand should we run?
+    pub subcommand: Cmd,
+}
+
+/// Which subcommand to run
+#[derive(Debug)]
+pub enum Cmd {
+    /// Generate a disk usage report
+    DiskUsageReport {
+        /// Whether sizes are in human-readable form
+        human: bool,
+    },
+    /// Validate all packages
+    Validate,
+}
+
+fn run(opts: Opts) -> Result<(), Error> {
     let alpm = Alpm::new()
         //.with_root_path(&BASE_PATH)
         .build()?;
@@ -35,8 +61,24 @@ fn run() -> Result<(), Error> {
     alpm.register_sync_database("multilib")?;
     */
 
-    print_packages_with_no_reason(&alpm)?;
-    print_total_package_size(&alpm)?;
+    match opts.subcommand {
+        Cmd::DiskUsageReport { human } => {
+            print_packages_with_no_reason(&alpm)?;
+            print_total_package_size(&alpm)?;
+        }
+        Cmd::Validate => {
+            let local_db = alpm.local_database();
+            let mut errors = HashMap::new();
+            for package in local_db.packages() {
+                let package = package?;
+                let pkg_errors = package.validate()?;
+                if pkg_errors.len() > 0 {
+                    errors.insert(package.name().to_owned(), pkg_errors);
+                }
+            }
+            println!("{:?}", errors);
+        }
+    }
 
     /*
     let mut core = alpm.sync_database("core")?;
@@ -57,20 +99,114 @@ fn run() -> Result<(), Error> {
     Ok(())
 }
 
+/// Print all packages, and their disk usage, where packages have no reason field.
+fn print_packages_with_no_reason(alpm: &Alpm) -> Result<(), Error> {
+    let local_db = alpm.local_database();
+    let mut packages = local_db.packages()
+        .map(|pkg| pkg.unwrap())
+        .filter(|pkg| pkg.reason().is_none())
+        .collect::<Vec<Package>>();
+
+    packages.sort_by(|a, b| a.name().cmp(b.name()));
+    let mut acc = 0;
+    let mut iter = packages.iter();
+    println!("-- Packages without install reason --");
+    if let Some(pkg) = iter.next() {
+        print!("{}", pkg.name());
+        acc += pkg.size();
+    }
+    for pkg in iter {
+        print!(", {}", pkg.name());
+        acc += pkg.size();
+    }
+    println!();
+    println!("Total disk space from packages without install reason: {}",
+             acc.file_size(BINARY).unwrap());
+    Ok(())
+}
+
+/// Print the total disk usage of all local packages
+fn print_total_package_size(alpm: &Alpm) -> Result<(), Error> {
+    let local_db = alpm.local_database();
+    let total_usage = local_db.packages()
+        .fold(Ok(0), |acc: Result<u64, Error>, pkg| {
+            match acc {
+                Ok(val) => Ok(val + pkg?.size()),
+                Err(e) => Err(e),
+            }
+        })?;
+
+    println!("Total disk space from packages: {}", total_usage.file_size(BINARY).unwrap());
+    Ok(())
+}
+
+impl Opts {
+    fn from_args<'a>(matches: ArgMatches<'a>) -> Opts {
+        Opts {
+            verbosity: match matches.occurrences_of("verbosity") {
+                0 => LevelFilter::Warn,
+                1 => LevelFilter::Info,
+                _ => LevelFilter::Debug,
+            },
+            subcommand: Cmd::from_args(matches)
+        }
+    }
+}
+
+impl Cmd {
+    fn from_args<'a>(matches: ArgMatches<'a>) -> Cmd {
+        match matches.subcommand() {
+            ("disk", Some(sub_m)) => {
+                Cmd::DiskUsageReport {
+                    human: sub_m.is_present("human")
+                }
+            },
+            ("validate", Some(sub_m)) => {
+                Cmd::Validate
+            },
+            _ => unreachable!()
+        }
+    }
+}
+
 fn main() {
     // Make a temporary archlinux installation.
     //make_base();
 
+    // Do argument parsing
+    let args = App::new("simple")
+        .author(crate_authors!())
+        .version(crate_version!())
+        .about("A command line tool showing off some of the functionality of the library.")
+        .setting(AppSettings::SubcommandRequired)
+        .arg(Arg::with_name("verbosity")
+            .long("verbose")
+            .short("v")
+            .multiple(true)
+            .help("how verbose to be when logging"))
+        .subcommand(App::new("disk")
+            .about("Prints a disk-usage report.")
+            .arg(Arg::with_name("human")
+                 .short("r")
+                 .long("human-readable")
+                 .help("if present, disk sized will be in human-readable form"))
+            )
+        .subcommand(App::new("validate")
+            .about("Check all packages against the local database.")
+            )
+        .get_matches();
+    let opts = Opts::from_args(args);
+
     // Make logging nice
     let mut builder = env_logger::Builder::from_default_env();
     builder
-        .filter_level(LevelFilter::Debug)
+        .filter_level(opts.verbosity)
         .filter_module("tokio_reactor", LevelFilter::Warn)
         .filter_module("tokio_core", LevelFilter::Warn)
         .filter_module("hyper", LevelFilter::Warn)
         .init();
 
-    if let Err(e) = run() {
+    if let Err(e) = run(opts) {
         let mut causes = e.causes();
         println!("-- Error --");
         let first = causes.next().unwrap();
@@ -143,40 +279,3 @@ fn run_command(mut cmd: Command) -> bool {
     }
 }
 
-/// Print all packages, and their disk usage, where packages have no reason field.
-fn print_packages_with_no_reason(alpm: &Alpm) -> Result<(), Error> {
-    let local_db = alpm.local_database();
-    println!("-- Packages without install reason --");
-    let mut packages = local_db.packages()
-        .map(|pkg| pkg.unwrap())
-        .filter(|pkg| pkg.reason().is_none())
-        .map(|pkg| {
-            let disk_usage = pkg.disk_usage(&*alpm.root_path())?;
-            Ok((pkg, disk_usage))
-        })
-        .collect::<Result<Vec<(Package, u64)>, Error>>()?;
-   
-    packages.sort_by_key(|&(_, usage)| usage);
-    let mut acc = 0;
-    for (pkg, usage) in packages.iter() {
-        println!("{}: {}", pkg.name(), usage);
-        acc += usage;
-    }
-    println!("Total disk space from packages without install reason: {}", acc);
-    Ok(())
-}
-
-/// Print the total disk usage of all local packages
-fn print_total_package_size(alpm: &Alpm) -> Result<(), Error> {
-    let local_db = alpm.local_database();
-    let total_usage = local_db.packages()
-        .fold(Ok(0), |acc: Result<u64, Error>, pkg| {
-            match acc {
-                Ok(val) => Ok(val + pkg?.disk_usage(&*alpm.root_path())?),
-                Err(e) => Err(e),
-            }
-        })?;
-   
-    println!("Total disk space from packages: {}", total_usage);
-    Ok(())
-}

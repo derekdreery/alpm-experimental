@@ -30,7 +30,7 @@ impl LocalDatabase {
     /// Helper to create a new database
     ///
     /// Path is the root path for databases.
-    pub(crate) fn new(path: PathBuf, sig_level: SignatureLevel) 
+    pub(crate) fn new(path: PathBuf, sig_level: SignatureLevel)
         -> Result<LocalDatabase, Error>
     {
         Ok(LocalDatabase {
@@ -61,8 +61,8 @@ impl LocalDatabase {
     }
 
     /// Get a package in this database, if present.
-    pub fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>) 
-        -> Result<LocalDbPackage, Error> 
+    pub fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>)
+        -> Result<LocalDbPackage, Error>
     {
         self.inner.package(name, version)
     }
@@ -73,8 +73,8 @@ impl LocalDatabase {
     }
 
     /// Get the latest version of a package in this database, if a version is present.
-    pub fn package_latest(&self, name: impl AsRef<str>) 
-        -> Result<LocalDbPackage, Error> 
+    pub fn package_latest(&self, name: impl AsRef<str>)
+        -> Result<LocalDbPackage, Error>
     {
         self.inner.package_latest(name)
     }
@@ -125,8 +125,8 @@ impl LocalDatabaseInner {
     }
 
     /// Get a package from the database
-    fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>) 
-        -> Result<LocalDbPackage, Error> 
+    fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>)
+        -> Result<LocalDbPackage, Error>
     {
         let name = name.as_ref();
         let version = version.as_ref();
@@ -251,7 +251,7 @@ impl LocalDatabaseInner {
                 if entry.file_name() == OsStr::new(LOCAL_DB_VERSION_FILE) {
                 } else {
                     // ignore extra files for now (should probably error)
-                    warn!("Unexpected file {} found in local db directory", 
+                    warn!("Unexpected file {} found in local db directory",
                           entry.path().display());
                 }
                 continue;
