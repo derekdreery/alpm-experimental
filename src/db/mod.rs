@@ -21,6 +21,7 @@ mod local;
 mod sync;
 
 pub use self::local::{LocalDatabase, LocalDbPackage};
+pub(crate) use self::local::{LocalDatabaseInner};
 pub use self::sync::SyncDatabase;
 pub(crate) use self::sync::{SyncDatabaseInner, SyncDbName};
 

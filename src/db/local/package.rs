@@ -5,6 +5,8 @@ use std::io;
 use std::marker::PhantomData;
 use std::time::SystemTime;
 use std::collections::HashMap;
+use std::rc::Weak;
+use std::cell::RefCell;
 
 use failure::ResultExt;
 use libflate::gzip::Decoder;
@@ -12,18 +14,27 @@ use mtree::{self, MTree, Entry};
 
 use alpm_desc::de;
 use error::{Error, ErrorKind};
+use Handle;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Hash)]
 pub struct Package {
     pub path: PathBuf,
     desc: PackageDesc,
     files: Vec<Entry>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    handle: Weak<RefCell<Handle>>,
 }
 
 impl Package {
-    pub fn from_local(path: PathBuf, name: &str, version: &str)
-        -> Result<Package, Error>
+    pub(crate) fn from_local(path: PathBuf,
+                      name: impl AsRef<str>,
+                      version: impl AsRef<str>,
+                      handle: Weak<RefCell<Handle>>) -> Result<Package, Error>
     {
+        let name = name.as_ref();
+        let version = version.as_ref();
+
         // get package description
         let desc_raw = fs::read_to_string(path.join("desc"))?;
         let desc: PackageDesc = de::from_str(&desc_raw)
@@ -31,20 +42,35 @@ impl Package {
 
         // check package name/version with path
         if desc.name != name {
-            return Err(format_err!(r#"Name on system ("{}") does not match name in package ("{}")"#, name, desc.name)
+            return Err(format_err!(r#"Name on system ("{}") does not match name in package ("{}")"#,
+                                   name, desc.name)
             .context(ErrorKind::InvalidLocalPackage(name.to_owned())).into());
         }
         if desc.version != version {
-            return Err(format_err!(r#"Version on system ("{}") does not match version in package ("{}")"#, version, desc.version)
+            return Err(format_err!(r#"Version on system ("{}") does not match version in \
+                       package ("{}")"#, version, desc.version)
             .context(ErrorKind::InvalidLocalPackage(name.to_owned())).into());
-
         }
 
+        // Get list of files, this is the list of actually installed files, mtree might have some
+        // extra ones we don't need/want.
+        let files_raw = fs::read_to_string(path.join("files"))?;
+        let files: Vec<PathBuf> = de::from_str(&files_raw)
+            .map(|f: Files| f.files)
+            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
+
         // get mtree
-        let files = MTree::from_reader(Decoder::new(fs::File::open(path.join("mtree"))?)?)
+        let mtree = MTree::from_reader(Decoder::new(fs::File::open(path.join("mtree"))?)?)
+            .filter(|entry| match entry {
+                // we have to do the `ends_with` hack because the mtree representation has a
+                // leading `./`. Also means this is O(n) rather than O(log n) which we could do
+                // using equality (with files as a HashSet)
+                Ok(e) => files.iter().any(|file| e.path().ends_with(file)),
+                Err(_) => true
+            })
             .collect::<Result<_, _>>()?;
 
-        Ok(Package { path, desc, files })
+        Ok(Package { path, desc, files: mtree, handle })
     }
 
     /// The package name.
@@ -171,8 +197,10 @@ impl Package {
     pub fn validate(&self) -> io::Result<Vec<ValidationError>> {
         info!("validating package {}", self.name());
         let mut errors = Vec::new();
+        let handle = self.handle.upgrade().expect("the alpm instance no longer exists");
+        let root_path = &handle.borrow().root_path;
         for file in self.files() {
-            let path = file.path();
+            let path = root_path.join(file.path());
             // Check
             let md = match path.metadata() {
                 Ok(md) => md,
@@ -187,15 +215,21 @@ impl Package {
                 match (FileType::from(ty), FileType::from(md.file_type())) {
                     (FileType::File, FileType::File) => (),
                     (FileType::File, ty) => {
-                        errors.push(ValidationError::wrong_type(FileType::File, ty));
+                        errors.push(ValidationError::wrong_type(
+                                format!("{}", file.path().display()),
+                                FileType::File, ty));
                     },
                     (FileType::Directory, FileType::Directory) => (),
                     (FileType::Directory, ty) => {
-                        errors.push(ValidationError::wrong_type(FileType::Directory, ty));
+                        errors.push(ValidationError::wrong_type(
+                                format!("{}", file.path().display()),
+                                FileType::Directory, ty));
                     },
                     (FileType::SymbolicLink, FileType::SymbolicLink) => (),
                     (FileType::SymbolicLink, ty) => {
-                        errors.push(ValidationError::wrong_type(FileType::SymbolicLink, ty));
+                        errors.push(ValidationError::wrong_type(
+                                format!("{}", file.path().display()),
+                                FileType::SymbolicLink, ty));
                     },
                     _ => ()
                 }
@@ -203,10 +237,11 @@ impl Package {
             // Check size
             if let Some(size) = file.size() {
                 if md.len() != size {
-                    errors.push(ValidationError::WrongSize {
-                        expected: size,
-                        actual: md.len()
-                    });
+                    errors.push(ValidationError::wrong_size(
+                        format!("{}", file.path().display()),
+                        size,
+                        md.len()
+                    ));
                 }
             }
         }
@@ -214,7 +249,8 @@ impl Package {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Struct to help deserializing `desc` file
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
 struct PackageDesc {
     name: String,
     version: String,
@@ -245,13 +281,14 @@ struct PackageDesc {
     provides: Vec<String>,
 }
 
+/// Struct to help deserializing `files` file
 #[derive(Debug, Deserialize, Serialize)]
 struct Files {
     #[serde(default)]
     files: Vec<PathBuf>
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
 pub enum Validation {
     #[serde(rename = "none")]
     None,
@@ -263,7 +300,7 @@ pub enum Validation {
     Pgp,
 }
 
-#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
 pub enum Reason {
     /// This package was explicitally installed
     #[serde(rename = "0")]
@@ -305,12 +342,12 @@ impl From<mtree::FileType> for FileType {
 
 impl From<fs::FileType> for FileType {
     fn from(f: fs::FileType) -> FileType {
-        if f.is_file() {
+        if f.is_symlink() {
+            FileType::SymbolicLink
+        } else if f.is_file() {
             FileType::File
         } else if f.is_dir() {
             FileType::Directory
-        } else if f.is_symlink() {
-            FileType::SymbolicLink
         } else {
             FileType::Other
         }
@@ -324,14 +361,16 @@ pub enum ValidationError {
     #[fail(display = "file missing at \"{}\"", _0)]
     FileNotFound(String),
     /// A file is the wrong type
-    #[fail(display = "database says file should be a {}, found a {}", expected, actual)]
+    #[fail(display = "database says file \"{}\" should be a {}, found a {}", filename, expected, actual)]
     WrongType {
+        filename: String,
         expected: FileType,
         actual: FileType,
     },
     /// A file is the wrong size
-    #[fail(display = "database says file should be {} bytes, found {}", expected, actual)]
+    #[fail(display = "database says file \"{}\" should be {} bytes, found {}", filename, expected, actual)]
     WrongSize {
+        filename: String,
         expected: u64,
         actual: u64,
     },
@@ -343,15 +382,21 @@ impl ValidationError {
         ValidationError::FileNotFound(s.into())
     }
     /// Constructor for WrongType variant
-    fn wrong_type(expected: impl Into<FileType>, actual: impl Into<FileType>) -> ValidationError {
+    fn wrong_type(filename: impl Into<String>,
+                  expected: impl Into<FileType>,
+                  actual: impl Into<FileType>) -> ValidationError {
         ValidationError::WrongType {
+            filename: filename.into(),
             expected: expected.into(),
             actual: actual.into()
         }
     }
     /// Constructor for WrongSize variant
-    fn wrong_size(expected: impl Into<u64>, actual: impl Into<u64>) -> ValidationError {
+    fn wrong_size(filename: impl Into<String>,
+                  expected: impl Into<u64>,
+                  actual: impl Into<u64>) -> ValidationError {
         ValidationError::WrongSize {
+            filename: filename.into(),
             expected: expected.into(),
             actual: actual.into()
         }

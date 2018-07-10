@@ -68,15 +68,20 @@ fn run(opts: Opts) -> Result<(), Error> {
         }
         Cmd::Validate => {
             let local_db = alpm.local_database();
-            let mut errors = HashMap::new();
-            for package in local_db.packages() {
-                let package = package?;
-                let pkg_errors = package.validate()?;
+            let mut errors = HashMap::with_capacity(local_db.count());
+            local_db.packages(|pkg| -> Result<(), Error> {
+                let pkg_errors = pkg.validate()?;
                 if pkg_errors.len() > 0 {
-                    errors.insert(package.name().to_owned(), pkg_errors);
+                    errors.insert(pkg.name().to_owned(), pkg_errors);
+                }
+                Ok(())
+            })?;
+            for (name, errs) in errors {
+                println!("--{}--", name);
+                for err in errs {
+                    println!("  {}", err);
                 }
             }
-            println!("{:?}", errors);
         }
     }
 
@@ -102,10 +107,13 @@ fn run(opts: Opts) -> Result<(), Error> {
 /// Print all packages, and their disk usage, where packages have no reason field.
 fn print_packages_with_no_reason(alpm: &Alpm) -> Result<(), Error> {
     let local_db = alpm.local_database();
-    let mut packages = local_db.packages()
-        .map(|pkg| pkg.unwrap())
-        .filter(|pkg| pkg.reason().is_none())
-        .collect::<Vec<Package>>();
+    let mut packages = Vec::new();
+    local_db.packages(|pkg| -> Result<(), Error> {
+        if pkg.reason().is_none() {
+            packages.push(pkg.clone());
+        }
+        Ok(())
+    })?;
 
     packages.sort_by(|a, b| a.name().cmp(b.name()));
     let mut acc = 0;
@@ -128,13 +136,11 @@ fn print_packages_with_no_reason(alpm: &Alpm) -> Result<(), Error> {
 /// Print the total disk usage of all local packages
 fn print_total_package_size(alpm: &Alpm) -> Result<(), Error> {
     let local_db = alpm.local_database();
-    let total_usage = local_db.packages()
-        .fold(Ok(0), |acc: Result<u64, Error>, pkg| {
-            match acc {
-                Ok(val) => Ok(val + pkg?.size()),
-                Err(e) => Err(e),
-            }
-        })?;
+    let mut total_usage = 0;
+    local_db.packages(|pkg| -> Result<(), Error> {
+        total_usage += pkg.size();
+        Ok(())
+    })?;
 
     println!("Total disk space from packages: {}", total_usage.file_size(BINARY).unwrap());
     Ok(())

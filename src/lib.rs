@@ -10,6 +10,8 @@ extern crate atoi;
 extern crate bitflags;
 extern crate chrono;
 #[macro_use]
+extern crate derivative;
+#[macro_use]
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
@@ -44,17 +46,19 @@ pub mod package;
 pub use error::{Error, ErrorKind};
 
 pub use db::{LocalDatabase, SyncDatabase};
-use db::{DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR, SyncDatabaseInner, SyncDbName, SignatureLevel};
+use db::{DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR, LocalDatabaseInner, SyncDatabaseInner, SyncDbName,
+    SignatureLevel};
 
 use failure::{Fail, ResultExt};
 use lockfile::Lockfile;
 use uname::uname;
 
+use std::cell::{RefCell, Ref};
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::mem;
 use std::ops::Deref;
-use std::cell::{RefCell, Ref};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 /// The name of the lockfile (hard-coded).
@@ -134,8 +138,12 @@ impl Alpm {
     }
 
     /// Get the local database for this alpm instance.
-    pub fn local_database<'a>(&'a self) -> impl Deref<Target=LocalDatabase> + 'a {
-        Ref::map(self.handle.borrow(), |handle| &handle.local_database)
+    pub fn local_database(&self) -> LocalDatabase {
+        LocalDatabase::new(match &self.handle.borrow().local_database {
+            Some(db) => db.clone(),
+            // The local database is always Some before this can be called.
+            None => unreachable!()
+        })
     }
 
     /// Get a sync database with the given name for this alpm instance.
@@ -177,7 +185,7 @@ impl Alpm {
 #[derive(Debug)]
 struct Handle {
     /// The local package database
-    local_database: LocalDatabase,
+    local_database: Option<Rc<RefCell<LocalDatabaseInner>>>,
     /// A list of all sync databases
     ///
     /// We can access these concurrently, as they manage their own mutability.
@@ -363,10 +371,9 @@ impl AlpmBuilder {
 
         signing::init(&gpg_path)?;
 
-        let local_database = LocalDatabase::new(database_path.clone(), SignatureLevel::default())?;
-
+        // Chicken-and-egg problem for local_database
         let handle = Rc::new(RefCell::new(Handle {
-            local_database,
+            local_database: None,
             sync_databases: HashMap::new(),
             root_path,
             database_path,
@@ -386,6 +393,9 @@ impl AlpmBuilder {
             check_space: true,
             http_client: reqwest::Client::new(),
         }));
+        let mut local_database = LocalDatabaseInner::new(&handle, SignatureLevel::default());
+        local_database.populate_package_cache()?;
+        handle.borrow_mut().local_database = Some(Rc::new(RefCell::new(local_database)));
         Ok(Alpm { handle })
     }
 }

@@ -1,0 +1,13 @@
+# Timings
+
+Baseline
+Debug:      95.24   21.77   1:57.29
+Release:    13.55   20.83     34.437
+
+u128::from_hex improvement - keeping because it's neater
+Debug:      92.02   21.35   1:53.69
+Release:    13.46   20.80   34.325      ~0%
+
+wrap Deflate in a BufReader
+Debug:
+Release:    14.20   20.80   35.091      ~0%
