@@ -5,6 +5,9 @@
 #![feature(str_escape)]
 #![feature(try_from)]
 
+#[cfg(not(unix))]
+compile_error!("Only works on unix for now");
+
 extern crate atoi;
 #[macro_use]
 extern crate bitflags;
@@ -29,11 +32,11 @@ extern crate reqwest;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate libflate;
+extern crate mtree;
 extern crate tempfile;
 #[cfg(not(windows))]
 extern crate uname;
-extern crate libflate;
-extern crate mtree;
 
 mod error;
 mod signing;
@@ -46,14 +49,16 @@ pub mod package;
 pub use error::{Error, ErrorKind};
 
 pub use db::{LocalDatabase, SyncDatabase};
-use db::{DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR, LocalDatabaseInner, SyncDatabaseInner, SyncDbName,
-    SignatureLevel};
+use db::{
+    LocalDatabaseInner, SignatureLevel, SyncDatabaseInner, SyncDbName, DEFAULT_SYNC_DB_EXT,
+    SYNC_DB_DIR,
+};
 
 use failure::{Fail, ResultExt};
 use lockfile::Lockfile;
 use uname::uname;
 
-use std::cell::{RefCell, Ref};
+use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::mem;
@@ -100,10 +105,11 @@ impl Alpm {
             warn!(r#"database "{}" already registered"#, name);
         } else {
             let handle = self.handle.clone();
-            let new_db = SyncDatabaseInner::new(handle,
-                                                name.clone(),
-                                                SignatureLevel::default());
-            self.handle.borrow_mut().sync_databases.insert(name, Rc::new(RefCell::new(new_db)));
+            let new_db = SyncDatabaseInner::new(handle, name.clone(), SignatureLevel::default());
+            self.handle
+                .borrow_mut()
+                .sync_databases
+                .insert(name, Rc::new(RefCell::new(new_db)));
         }
         Ok(())
     }
@@ -112,7 +118,7 @@ impl Alpm {
     pub fn sync_database_exists(&self, name: impl AsRef<str>) -> bool {
         match SyncDbName::new(name.as_ref()) {
             Ok(name) => self.handle.borrow().sync_databases.contains_key(&name),
-            Err(_) => false
+            Err(_) => false,
         }
     }
 
@@ -124,12 +130,24 @@ impl Alpm {
         let name = match SyncDbName::new(name) {
             Ok(name) => name,
             Err(_) => {
-                warn!("could not unregister a database with name \"{}\" (name not valid)", name);
+                warn!(
+                    "could not unregister a database with name \"{}\" (name not valid)",
+                    name
+                );
                 return;
             }
         };
-        if ! self.handle.borrow_mut().sync_databases.remove(&name).is_none() {
-            warn!("could not unregister a database with name \"{}\" (not found)", name);
+        if !self
+            .handle
+            .borrow_mut()
+            .sync_databases
+            .remove(&name)
+            .is_none()
+        {
+            warn!(
+                "could not unregister a database with name \"{}\" (not found)",
+                name
+            );
         }
     }
 
@@ -142,7 +160,7 @@ impl Alpm {
         LocalDatabase::new(match &self.handle.borrow().local_database {
             Some(db) => db.clone(),
             // The local database is always Some before this can be called.
-            None => unreachable!()
+            None => unreachable!(),
         })
     }
 
@@ -150,14 +168,12 @@ impl Alpm {
     ///
     /// The database is only valid while the `Alpm` instance is in scope. Once it is dropped, all
     /// calls to the database will error.
-    pub fn sync_database(&self, name: impl AsRef<str>)
-        -> Result<SyncDatabase, Error>
-    {
+    pub fn sync_database(&self, name: impl AsRef<str>) -> Result<SyncDatabase, Error> {
         let name = name.as_ref();
         let db_name = SyncDbName::new(name)?;
         let db = match self.handle.borrow().sync_databases.get(&db_name) {
             Some(handle) => Ok(handle.clone()),
-            None => Err(Error::from(ErrorKind::DatabaseNotFound(name.to_owned())))
+            None => Err(Error::from(ErrorKind::DatabaseNotFound(name.to_owned()))),
         }?;
 
         let name = db_name.into();
@@ -167,15 +183,17 @@ impl Alpm {
 
     /// Get the parent database path
     pub fn database_path<'a>(&'a self) -> impl AsRef<Path> + 'a {
-        util::DerefAsRef(Ref::map(self.handle.borrow(), |handle| &*handle.database_path))
+        util::DerefAsRef(Ref::map(self.handle.borrow(), |handle| {
+            &*handle.database_path
+        }))
     }
 
     /// Get the parent database path
-    pub fn database_extension<'a>(&'a self) -> impl Deref<Target=String> + 'a {
+    pub fn database_extension<'a>(&'a self) -> impl Deref<Target = String> + 'a {
         Ref::map(self.handle.borrow(), |handle| &handle.database_extension)
     }
 
-    pub fn root_path<'a>(&'a self) -> impl Deref<Target=PathBuf> + 'a {
+    pub fn root_path<'a>(&'a self) -> impl Deref<Target = PathBuf> + 'a {
         Ref::map(self.handle.borrow(), |handle| &handle.root_path)
     }
 }
@@ -318,9 +336,10 @@ impl AlpmBuilder {
         debug!("database path: {}", database_path.display());
         // todo should I be checking database_path is valid here?
 
-        let database_extension = self.database_extension.unwrap_or(
-            DEFAULT_SYNC_DB_EXT.to_owned());
-        if ! util::is_valid_db_extension(&database_extension) {
+        let database_extension = self
+            .database_extension
+            .unwrap_or(DEFAULT_SYNC_DB_EXT.to_owned());
+        if !util::is_valid_db_extension(&database_extension) {
             return Err(ErrorKind::BadSyncDatabaseExt(database_extension).into());
         }
         debug!("database extension: .{}", &database_extension);

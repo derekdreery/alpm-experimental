@@ -1,4 +1,4 @@
-use std::cell::{RefCell, Ref};
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::error;
 use std::fmt;
@@ -8,8 +8,8 @@ use std::ops::Deref;
 use std::path::Path;
 use std::rc::Rc;
 
-use failure::Fail;
 use error::Error;
+use failure::Fail;
 
 use reqwest::Url;
 
@@ -71,8 +71,8 @@ pub struct DerefDerefAsRef<D>(pub D);
 
 impl<D, D2> AsRef<D2::Target> for DerefDerefAsRef<D>
 where
-    D: Deref<Target=D2>,
-    D2: Deref + 'static
+    D: Deref<Target = D2>,
+    D2: Deref + 'static,
 {
     fn as_ref(&self) -> &D2::Target {
         let tmp = self.0.deref();
@@ -119,7 +119,7 @@ impl fmt::Display for UrlOrStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             UrlOrStr::Url(ref url) => fmt::Display::fmt(url, f),
-            UrlOrStr::Str(ref s) => fmt::Display::fmt(s, f)
+            UrlOrStr::Str(ref s) => fmt::Display::fmt(s, f),
         }
     }
 }

@@ -14,8 +14,9 @@
 
 pub use super::de_error::{Error, ErrorKind, Result};
 
-use serde::de::{self, Deserialize, DeserializeSeed, MapAccess, SeqAccess, Visitor,
-    IntoDeserializer};
+use serde::de::{
+    self, Deserialize, DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor,
+};
 
 use std::fmt;
 use std::str::FromStr;
@@ -245,22 +246,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         // can only deserialize structures at root
         Err(ErrorKind::Unsupported("()").into())
     }
-    fn deserialize_unit_struct<V>(
-        self,
-        _name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value>
+    fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         self.deserialize_unit(visitor)
     }
 
-    fn deserialize_newtype_struct<V>(
-        self,
-        _name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value>
+    fn deserialize_newtype_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
@@ -386,7 +379,8 @@ impl<'a, 'de> MapAccess<'de> for AlpmMap<'a, 'de> {
             input: &key,
             allow_list: false,
             line_ending: self.de.line_ending,
-        }).map(Some)
+        })
+        .map(Some)
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
@@ -416,7 +410,7 @@ impl<'de> DeserializerInner<'de> {
                 let value = &self.input[..newline_pos];
                 self.input = &self.input[newline_pos + self.line_ending.len()..];
                 value
-            },
+            }
             None => {
                 let value = &self.input[..];
                 self.input = &self.input[self.input.len()..];
@@ -517,7 +511,11 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
     where
         V: Visitor<'de>,
     {
-        let ch = self.input.chars().next().ok_or(Error::from(ErrorKind::ExpectedChar))?;
+        let ch = self
+            .input
+            .chars()
+            .next()
+            .ok_or(Error::from(ErrorKind::ExpectedChar))?;
         visitor.visit_char(ch)
     }
 
@@ -539,10 +537,12 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
     where
         V: Visitor<'de>,
     {
-        let bytes = self.input.as_bytes().chunks(2).map(|ch| {
-            nom_parsers::parse_byte(ch)
-                .ok_or(ErrorKind::ExpectedByte.into())
-        }).collect::<Result<Vec<u8>>>()?;
+        let bytes = self
+            .input
+            .as_bytes()
+            .chunks(2)
+            .map(|ch| nom_parsers::parse_byte(ch).ok_or(ErrorKind::ExpectedByte.into()))
+            .collect::<Result<Vec<u8>>>()?;
         visitor.visit_byte_buf(bytes)
     }
 
@@ -575,22 +575,14 @@ impl<'de> de::Deserializer<'de> for DeserializerInner<'de> {
         }
     }
 
-    fn deserialize_unit_struct<V>(
-        self,
-        _name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value>
+    fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         self.deserialize_unit(visitor)
     }
 
-    fn deserialize_newtype_struct<V>(
-        self,
-        _name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value>
+    fn deserialize_newtype_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
@@ -697,7 +689,9 @@ impl<'de> DeserializerInner<'de> {
     where
         T: FromStr,
     {
-        self.input.parse().map_err(|_| ErrorKind::ExpectedUnsigned.into())
+        self.input
+            .parse()
+            .map_err(|_| ErrorKind::ExpectedUnsigned.into())
     }
 
     /// Parse a signed int
@@ -706,7 +700,9 @@ impl<'de> DeserializerInner<'de> {
         T: FromStr,
         <T as FromStr>::Err: fmt::Debug,
     {
-        self.input.parse().map_err(|_| ErrorKind::ExpectedSigned.into())
+        self.input
+            .parse()
+            .map_err(|_| ErrorKind::ExpectedSigned.into())
     }
 
     /// Parse a float
@@ -715,9 +711,11 @@ impl<'de> DeserializerInner<'de> {
     fn parse_float<T>(&mut self) -> Result<T>
     where
         T: FromStr,
-        <T as FromStr>::Err: ::std::error::Error
+        <T as FromStr>::Err: ::std::error::Error,
     {
-        self.input.parse().map_err(|_| ErrorKind::ExpectedFloat.into())
+        self.input
+            .parse()
+            .map_err(|_| ErrorKind::ExpectedFloat.into())
     }
 }
 
@@ -735,8 +733,8 @@ impl<'a, 'de> SeqAccess<'de> for AlpmSeq<'a, 'de> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
-        where
-            T: DeserializeSeed<'de>,
+    where
+        T: DeserializeSeed<'de>,
     {
         let element = self.de.parse_seq_element();
         Ok(if element.len() == 0 {
@@ -763,17 +761,17 @@ mod nom_parsers {
             _ => false,
         }
     }
-
+    
     named!(pub parse_unsigned(&str) -> &str, recognize!(
         take_while1!(call!(is_digit))
     ));
-
+    
     named!(pub parse_signed(&str) -> &str, recognize!(do_parse!(
         opt!(alt!(tag!("+") | tag!("-"))) >>
         take_while1!(call!(is_digit)) >>
         (())
     )));
-
+    
     named!(pub parse_float(&str) -> &str, recognize!(
         do_parse!(
             opt!(alt!(tag!("+") | tag!("-"))) >>
@@ -786,12 +784,13 @@ mod nom_parsers {
     */
 
     pub fn parse_key<'a>(input: &'a str, line_ending: &'static str) -> IResult<&'a str, &'a str> {
-        do_parse!(input,
-            tag!("%") >>
-            name: take_till1!(|ch| ch == '%') >>
-            tag!("%") >>
-            tag!(line_ending) >>
-            (name)
+        do_parse!(
+            input,
+            tag!("%")
+                >> name: take_till1!(|ch| ch == '%')
+                >> tag!("%")
+                >> tag!(line_ending)
+                >> (name)
         )
     }
 
@@ -799,9 +798,9 @@ mod nom_parsers {
         #[inline]
         fn hex_to_u8(input: u8) -> Option<u8> {
             match input {
-                val @ b'0' ..= b'9' => Some(val - b'0'),
-                val @ b'a' ..= b'f' => Some(val - b'a' + 10),
-                val @ b'A' ..= b'F' => Some(val - b'A' + 10),
+                val @ b'0'..=b'9' => Some(val - b'0'),
+                val @ b'a'..=b'f' => Some(val - b'a' + 10),
+                val @ b'A'..=b'F' => Some(val - b'A' + 10),
                 _ => None,
             }
         }
@@ -822,17 +821,17 @@ mod nom_parsers {
             assert!(!is_digit(*negative));
         }
     }
-
+    
     #[test]
     fn test_parse_unsigned() {
         assert_eq!(parse_unsigned("60 sef"), Ok((" sef", "60")));
     }
-
+    
     #[test]
     fn test_parse_signed() {
         assert_eq!(parse_signed("60 sef"), Ok((" sef", "60")));
     }
-
+    
     #[test]
     fn test_parse_float() {
         assert_eq!(parse_float("60. sef"), Ok((" sef", "60.")));

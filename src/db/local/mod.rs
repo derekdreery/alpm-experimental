@@ -1,19 +1,19 @@
 use std::borrow::Cow;
+use std::cell::{Ref, RefCell, RefMut};
 use std::collections::hash_map::{self, HashMap};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
 use std::iter::repeat;
 use std::path::{Path, PathBuf};
-use std::cell::{Ref, RefMut, RefCell};
 use std::rc::{Rc, Weak};
 
 use atoi::atoi;
-use failure::{self, Fail, ResultExt, err_msg};
+use failure::{self, err_msg, Fail, ResultExt};
 
 use alpm_desc::de;
-use error::{ErrorKind, Error};
-use db::{LOCAL_DB_NAME, SignatureLevel, DbStatus, DbUsage};
+use db::{DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME};
+use error::{Error, ErrorKind};
 use Handle;
 
 mod package;
@@ -25,7 +25,7 @@ const LOCAL_DB_CURRENT_VERSION: u64 = 9;
 /// A package database.
 #[derive(Debug)]
 pub struct LocalDatabase {
-    inner: Rc<RefCell<LocalDatabaseInner>>
+    inner: Rc<RefCell<LocalDatabaseInner>>,
 }
 
 impl LocalDatabase {
@@ -35,7 +35,6 @@ impl LocalDatabase {
     pub(crate) fn new(inner: Rc<RefCell<LocalDatabaseInner>>) -> LocalDatabase {
         LocalDatabase { inner }
     }
-
 }
 
 impl LocalDatabase {
@@ -64,9 +63,11 @@ impl LocalDatabase {
     }
 
     /// Get a package in this database, if present.
-    pub fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>)
-        -> Result<Rc<LocalDbPackage>, Error>
-    {
+    pub fn package(
+        &self,
+        name: impl AsRef<str>,
+        version: impl AsRef<str>,
+    ) -> Result<Rc<LocalDbPackage>, Error> {
         self.inner.borrow().package(name, version)
     }
 
@@ -79,8 +80,9 @@ impl LocalDatabase {
     /// Because the closure receives reference counted packages, they are cheap to clone, and can
     /// be collected into a Vec if that is desired.
     pub fn packages<E, F>(&self, f: F) -> Result<(), E>
-    where F: FnMut(Rc<LocalDbPackage>) -> Result<(), E>,
-          E: From<Error>
+    where
+        F: FnMut(Rc<LocalDbPackage>) -> Result<(), E>,
+        E: From<Error>,
     {
         self.inner.borrow().packages(f)
     }
@@ -109,16 +111,16 @@ pub struct LocalDatabaseInner {
 }
 
 impl LocalDatabaseInner {
-
     /// Helper to create a new database
     ///
     /// Path is the root path for databases.
     ///
     /// The database folder will be read to get a cache of package names.
     // This function must not panic, it is UB to panic here.
-    pub(crate) fn new(handle: &Rc<RefCell<Handle>>, sig_level: SignatureLevel)
-        -> LocalDatabaseInner
-    {
+    pub(crate) fn new(
+        handle: &Rc<RefCell<Handle>>,
+        sig_level: SignatureLevel,
+    ) -> LocalDatabaseInner {
         //  path is `$db_path SEP $local_db_name` for local
         let path = handle.borrow().database_path.join(LOCAL_DB_NAME);
         LocalDatabaseInner {
@@ -141,9 +143,11 @@ impl LocalDatabaseInner {
     }
 
     /// Get a package from the database
-    fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>)
-        -> Result<Rc<LocalDbPackage>, Error>
-    {
+    fn package(
+        &self,
+        name: impl AsRef<str>,
+        version: impl AsRef<str>,
+    ) -> Result<Rc<LocalDbPackage>, Error> {
         let name = name.as_ref();
         let version = version.as_ref();
 
@@ -173,10 +177,12 @@ impl LocalDatabaseInner {
     }
 
     fn packages<'a, E, F>(&'a self, mut f: F) -> Result<(), E>
-        where F: FnMut(Rc<LocalDbPackage>) -> Result<(), E>,
-              E: From<Error>
+    where
+        F: FnMut(Rc<LocalDbPackage>) -> Result<(), E>,
+        E: From<Error>,
     {
-        for pkg in self.package_cache
+        for pkg in self
+            .package_cache
             .values()
             .map(|pkg| pkg.borrow_mut().load(self.handle.clone()))
         {
@@ -194,12 +200,10 @@ impl LocalDatabaseInner {
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                 return Ok(DbStatus::Missing);
             }
-            Err(e) => {
-                return Err(e.context(ErrorKind::UnexpectedIo).into())
-            }
+            Err(e) => return Err(e.context(ErrorKind::UnexpectedIo).into()),
         };
 
-        if ! md.is_dir() {
+        if !md.is_dir() {
             return Ok(DbStatus::Exists { valid: false });
         }
 
@@ -211,16 +215,20 @@ impl LocalDatabaseInner {
                     if version == LOCAL_DB_CURRENT_VERSION {
                         true
                     } else {
-                        warn!(r#"local database version is "{}" which is not the latest ("{}")"#,
-                              version, LOCAL_DB_CURRENT_VERSION);
+                        warn!(
+                            r#"local database version is "{}" which is not the latest ("{}")"#,
+                            version, LOCAL_DB_CURRENT_VERSION
+                        );
                         false
                     }
                 } else {
-                    error!(r#""{}" is not a valid version"#,
-                           String::from_utf8_lossy(&version_raw));
+                    error!(
+                        r#""{}" is not a valid version"#,
+                        String::from_utf8_lossy(&version_raw)
+                    );
                     false
                 }
-            },
+            }
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                 // check directory is empty and create version file
                 debug!("local database version file not found - creating");
@@ -230,24 +238,30 @@ impl LocalDatabaseInner {
                         None => match self.create_version_file() {
                             Ok(_) => true,
                             Err(e) => {
-                                error!("could not create version file for local database at {}",
-                                       self.path.display());
+                                error!(
+                                    "could not create version file for local database at {}",
+                                    self.path.display()
+                                );
                                 error!("caused by {}", e);
                                 false
                             }
-                        }
-                    }
+                        },
+                    },
                     Err(e) => {
-                        error!("could not check contents of local database directory at {}",
-                               self.path.display());
+                        error!(
+                            "could not check contents of local database directory at {}",
+                            self.path.display()
+                        );
                         error!("caused by {}", e);
                         false
                     }
                 }
-            },
+            }
             Err(e) => {
-                error!("could not read version file for the local database at {}",
-                       self.path.display());
+                error!(
+                    "could not read version file for the local database at {}",
+                    self.path.display()
+                );
                 error!("caused by {}", e);
                 false
             }
@@ -255,35 +269,44 @@ impl LocalDatabaseInner {
         Ok(DbStatus::Exists { valid })
     }
 
-
     /// Load all package names into the cache, and validate the database
     // The syscalls for this function are a single readdir and a stat per subentry
     pub(crate) fn populate_package_cache(&mut self) -> Result<(), Error> {
-        debug!(r#"searching for local packages in "{}""#, self.path.display());
+        debug!(
+            r#"searching for local packages in "{}""#,
+            self.path.display()
+        );
         for entry in fs::read_dir(&self.path)? {
             let entry = entry?;
-            if ! entry.metadata()?.is_dir() {
+            if !entry.metadata()?.is_dir() {
                 // Check ALPM_DB_VERSION
                 if entry.file_name() == OsStr::new(LOCAL_DB_VERSION_FILE) {
                 } else {
                     // ignore extra files for now (should probably error)
-                    warn!("Unexpected file {} found in local db directory",
-                          entry.path().display());
+                    warn!(
+                        "Unexpected file {} found in local db directory",
+                        entry.path().display()
+                    );
                 }
                 continue;
             }
             let path = entry.path();
             // Non-utf8 is hard until https://github.com/rust-lang/rfcs/pull/2295 lands
-            let file_name = entry.file_name()
+            let file_name = entry
+                .file_name()
                 .into_string()
                 .expect("non-utf8 package names not yet supported");
             let (name, version) = split_package_dirname(&file_name)
                 .ok_or(ErrorKind::InvalidLocalPackage(file_name.to_owned()))?;
             debug!(r#"found "{}", version: "{}""#, name, version);
-            if self.package_cache.insert(
-                PackageKey::from_owned(name, version),
-                RefCell::new(MaybePackage::new(path, name, version))
-            ).is_some() {
+            if self
+                .package_cache
+                .insert(
+                    PackageKey::from_owned(name, version),
+                    RefCell::new(MaybePackage::new(path, name, version)),
+                )
+                .is_some()
+            {
                 // This should not be possible (since name comes from unique filename)
                 panic!("Found package in localdb with duplicate name/version");
             }
@@ -299,35 +322,45 @@ enum MaybePackage {
     Unloaded {
         path: PathBuf,
         name: String,
-        version: String
+        version: String,
     },
     /// Loaded the package
-    Loaded(Rc<LocalDbPackage>)
+    Loaded(Rc<LocalDbPackage>),
 }
 
 impl MaybePackage {
     /// Create an unloaded package
-    fn new(path: impl Into<PathBuf>,
-           name: impl Into<String>,
-           version: impl Into<String>) -> MaybePackage
-    {
+    fn new(
+        path: impl Into<PathBuf>,
+        name: impl Into<String>,
+        version: impl Into<String>,
+    ) -> MaybePackage {
         MaybePackage::Unloaded {
             path: path.into(),
             name: name.into(),
-            version: version.into()
+            version: version.into(),
         }
     }
 
     /// Load the package if necessary and return it
     fn load(&mut self, handle: Weak<RefCell<Handle>>) -> Result<Rc<LocalDbPackage>, Error> {
         match self {
-            MaybePackage::Unloaded { path, name, version } => {
+            MaybePackage::Unloaded {
+                path,
+                name,
+                version,
+            } => {
                 // todo find a way to avoid cloning `path`
-                let pkg = Rc::new(LocalDbPackage::from_local(path.clone(), name, version, handle)?);
+                let pkg = Rc::new(LocalDbPackage::from_local(
+                    path.clone(),
+                    name,
+                    version,
+                    handle,
+                )?);
                 *self = MaybePackage::Loaded(pkg.clone());
                 Ok(pkg)
-            },
-            MaybePackage::Loaded(pkg) => Ok(pkg.clone())
+            }
+            MaybePackage::Loaded(pkg) => Ok(pkg.clone()),
         }
     }
 }
@@ -370,5 +403,8 @@ fn split_package_dirname(input: &str) -> Option<(&str, &str)> {
 
 #[test]
 fn test_split_package_dirname() {
-    assert_eq!(split_package_dirname("abc-1223123-34"), Some(("abc", "1223123-34")));
+    assert_eq!(
+        split_package_dirname("abc-1223123-34"),
+        Some(("abc", "1223123-34"))
+    );
 }

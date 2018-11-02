@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use std::io;
 use std::result::Result as StdResult;
 
-use failure::{Fail, Context};
+use failure::{Context, Fail};
 use serde::ser;
 
 /// The error type for serialization
@@ -57,7 +57,9 @@ impl Display for Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
-        Error { inner: Context::new(kind) }
+        Error {
+            inner: Context::new(kind),
+        }
     }
 }
 
@@ -93,4 +95,3 @@ impl From<io::Error> for Error {
 }
 
 pub type Result<T> = StdResult<T, Error>;
-

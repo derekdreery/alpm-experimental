@@ -1,8 +1,8 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
-use std::time::SystemTime;
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use serde::de::{self, Visitor};
 
@@ -38,7 +38,7 @@ pub struct PackageFile;
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
 pub enum Validation {
     //Sha256(Array64<u8>),
-    // TODO Pgp,
+// TODO Pgp,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]

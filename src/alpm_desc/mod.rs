@@ -16,7 +16,7 @@ mod tests {
         age_diff: i32,
         height: f32,
         friends: Vec<String>,
-        best_friend: (String, u16)
+        best_friend: (String, u16),
     }
 
     #[test]

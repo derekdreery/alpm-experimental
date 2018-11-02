@@ -1,8 +1,8 @@
 use failure::{Backtrace, Context, Fail};
+use mtree;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-use mtree;
 
 /// The main error type for this library.
 #[derive(Debug)]
@@ -15,23 +15,28 @@ pub struct Error {
 pub enum ErrorKind {
     /// Indicates that the specified root directory is not valid, either because it is
     /// inaccessible, or because it is not a directory.
-    #[fail(display = "The root path \"{:?}\" does not point to a valid directory on the system.",
-           _0)]
+    #[fail(
+        display = "The root path \"{:?}\" does not point to a valid directory on the system.",
+        _0
+    )]
     // this would be better displayed using Path::display, but can't do this in procedural macro.
     BadRootPath(PathBuf),
     /// Indicates that the specified database directory is not valid, either because it is
     /// inaccessible, or because it is not a directory.
-    #[fail(display = "The database path \"{:?}\" does not point to a valid directory on the system.",
-           _0)]
+    #[fail(
+        display = "The database path \"{:?}\" does not point to a valid directory on the system.",
+        _0
+    )]
     BadDatabasePath(PathBuf),
     /// The extension provided is not a valid database extension.
-    #[fail(display = "\"{}\" is not a valid database extension.",
-    _0)]
+    #[fail(display = "\"{}\" is not a valid database extension.", _0)]
     BadSyncDatabaseExt(String),
     /// Indicates that the specified sync database directory is not valid, either because it is
     /// inaccessible, or because it is not a directory.
-    #[fail(display = "The sync database path \"{:?}\" does not point to a valid directory on the system.",
-           _0)]
+    #[fail(
+        display = "The sync database path \"{:?}\" does not point to a valid directory on the system.",
+        _0
+    )]
     BadSyncDatabasePath(PathBuf),
     /// Indicates a general error creating lockfile, for example due to permissions.
     #[fail(display = "Cannot create the lockfile at \"{:?}\"", _0)]
@@ -39,15 +44,19 @@ pub enum ErrorKind {
     /// Indicates there was a lockfile already present.
     ///
     /// This can also happen if the library crashed, in which case it is safe to remove the file.
-    #[fail(display = "Lockfile at \"{:?}\" already exists - you may delete it if you are certain no other instance is running",
-           _0)]
+    #[fail(
+        display = "Lockfile at \"{:?}\" already exists - you may delete it if you are certain no other instance is running",
+        _0
+    )]
     LockAlreadyExists(PathBuf),
     /// Indicates that a lock cannot be released
     #[fail(display = "Cannot release (remove) the lockfile at \"{:?}\"", _0)]
     CannotReleaseLock(PathBuf),
     /// A given database name is invalid.
-    #[fail(display = "Cannot use \"{}\" as a database name - it is not a valid directory name",
-           _0)]
+    #[fail(
+        display = "Cannot use \"{}\" as a database name - it is not a valid directory name",
+        _0
+    )]
     InvalidDatabaseName(String),
     /// A given database name already exists.
     #[fail(display = "Database with name \"{}\" already exists", _0)]
@@ -62,15 +71,18 @@ pub enum ErrorKind {
     #[fail(display = "Could not query database \"{}\" on the filesystem.", _0)]
     CannotQueryDatabase(String),
     /// Failed to add server with given url to database.
-    #[fail(display = "Cannot add server with url \"{}\" to database \"{}\".", url, database)]
-    CannotAddServerToDatabase {
-        url: String,
-        database: String,
-    },
+    #[fail(
+        display = "Cannot add server with url \"{}\" to database \"{}\".",
+        url, database
+    )]
+    CannotAddServerToDatabase { url: String, database: String },
     #[fail(display = "A package (\"{}\") in the local database was invalid", _0)]
     InvalidLocalPackage(String),
     /// There was an error when getting/updating the database version.
-    #[fail(display = "there was an unexpected error getting/updating the version for database \"{}\"", _0)]
+    #[fail(
+        display = "there was an unexpected error getting/updating the version for database \"{}\"",
+        _0
+    )]
     DatabaseVersion(String),
     /// Error configuring gpg.
     #[fail(display = "there was an error configuring gpgme")]
@@ -82,7 +94,10 @@ pub enum ErrorKind {
     #[fail(display = "a signature did not match")]
     SignatureIncorrect,
     /// An unexpected error occurred during signature verification.
-    #[fail(display = "an unexpected error occurred while processing a signature for \"{}\"", _0)]
+    #[fail(
+        display = "an unexpected error occurred while processing a signature for \"{}\"",
+        _0
+    )]
     UnexpectedSignature(String),
     /// The main handle has been dropped
     #[fail(display = "no operations are possible after the main handle has been dropped")]
@@ -146,7 +161,7 @@ impl From<mtree::Error> for Error {
     fn from(from: mtree::Error) -> Error {
         match from {
             mtree::Error::Io(e) => Error::from(e),
-            mtree::Error::Parser(e) => e.context(ErrorKind::UnexpectedMtree).into()
+            mtree::Error::Parser(e) => e.context(ErrorKind::UnexpectedMtree).into(),
         }
     }
 }

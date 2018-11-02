@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use std::io;
 use std::result::Result as StdResult;
 
-use failure::{Fail, Context, Compat};
+use failure::{Compat, Context, Fail};
 use serde::{de, ser};
 
 /// The error type for deserialization
@@ -78,7 +78,9 @@ impl Display for Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
-        Error { inner: Context::new(kind) }
+        Error {
+            inner: Context::new(kind),
+        }
     }
 }
 
@@ -103,12 +105,11 @@ impl ::std::error::Error for Error {
 
 impl de::Error for Error {
     fn custom<T>(msg: T) -> Self
-        where
-            T: Display,
+    where
+        T: Display,
     {
         ErrorKind::Custom(format!("{}", msg)).into()
     }
 }
 
 pub type Result<T> = StdResult<T, Error>;
-

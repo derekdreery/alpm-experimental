@@ -1,16 +1,16 @@
-use std::path::{PathBuf, Path};
-use std::fs;
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt;
+use std::fs;
 use std::io;
 use std::marker::PhantomData;
-use std::time::SystemTime;
-use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Weak;
-use std::cell::RefCell;
+use std::time::SystemTime;
 
 use failure::ResultExt;
 use libflate::gzip::Decoder;
-use mtree::{self, MTree, Entry};
+use mtree::{self, Entry, MTree};
 
 use alpm_desc::de;
 use error::{Error, ErrorKind};
@@ -27,50 +27,81 @@ pub struct Package {
 }
 
 impl Package {
-    pub(crate) fn from_local(path: PathBuf,
-                      name: impl AsRef<str>,
-                      version: impl AsRef<str>,
-                      handle: Weak<RefCell<Handle>>) -> Result<Package, Error>
-    {
+    pub(crate) fn from_local(
+        path: PathBuf,
+        name: impl AsRef<str>,
+        version: impl AsRef<str>,
+        handle: Weak<RefCell<Handle>>,
+    ) -> Result<Package, Error> {
         let name = name.as_ref();
         let version = version.as_ref();
 
         // get package description
         let desc_raw = fs::read_to_string(path.join("desc"))?;
-        let desc: PackageDesc = de::from_str(&desc_raw)
-            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
+        let desc: PackageDesc =
+            de::from_str(&desc_raw).context(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
 
         // check package name/version with path
         if desc.name != name {
-            return Err(format_err!(r#"Name on system ("{}") does not match name in package ("{}")"#,
-                                   name, desc.name)
-            .context(ErrorKind::InvalidLocalPackage(name.to_owned())).into());
+            return Err(format_err!(
+                r#"Name on system ("{}") does not match name in package ("{}")"#,
+                name,
+                desc.name
+            )
+            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))
+            .into());
         }
         if desc.version != version {
-            return Err(format_err!(r#"Version on system ("{}") does not match version in \
-                       package ("{}")"#, version, desc.version)
-            .context(ErrorKind::InvalidLocalPackage(name.to_owned())).into());
+            return Err(format_err!(
+                r#"Version on system ("{}") does not match version in \
+                       package ("{}")"#,
+                version,
+                desc.version
+            )
+            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))
+            .into());
         }
 
         // Get list of files, this is the list of actually installed files, mtree might have some
         // extra ones we don't need/want.
+        // FIXME for now, we use the fact we are on unix to convert paths to byte arrays for faster
+        // comparing.
         let files_raw = fs::read_to_string(path.join("files"))?;
-        let files: Vec<PathBuf> = de::from_str(&files_raw)
+        let files: HashSet<Vec<u8>> = de::from_str(&files_raw)
             .map(|f: Files| f.files)
-            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
+            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))?
+            .into_iter()
+            .map(|file| {
+                use std::os::unix::ffi::OsStringExt;
+                use std::ffi::OsString;
+                OsString::from(file).into_vec()
+            }).collect();
 
+        let prefix = Path::new("./");
         // get mtree
-        let mtree = MTree::from_reader(Decoder::new(fs::File::open(path.join("mtree"))?)?)
-            .filter(|entry| match entry {
-                // we have to do the `ends_with` hack because the mtree representation has a
-                // leading `./`. Also means this is O(n) rather than O(log n) which we could do
-                // using equality (with files as a HashSet)
-                Ok(e) => files.iter().any(|file| e.path().ends_with(file)),
-                Err(_) => true
-            })
-            .collect::<Result<_, _>>()?;
+        let mtree = MTree::from_reader(Decoder::new(io::BufReader::new(fs::File::open(
+            path.join("mtree"),
+        )?))?)
+        .filter(|entry| match entry {
+            // we have to do the `ends_with` hack because the mtree representation has a
+            // leading `./`. Also means this is O(n) rather than O(log n) which we could do
+            // using equality (with files as a HashSet)
+            Ok(e) => {
+                use std::os::unix::ffi::OsStrExt;
+                use std::ffi::OsStr;
+                let mtree_file = <Path as AsRef<OsStr>>::as_ref(e.path()).as_bytes();
+                files.contains(&mtree_file[2..])
+            },
+            Err(_) => true,
+        })
+        .collect::<Result<_, _>>()?;
 
-        Ok(Package { path, desc, files: mtree, handle })
+        Ok(Package {
+            path,
+            desc,
+            files: mtree,
+            handle,
+        })
     }
 
     /// The package name.
@@ -94,7 +125,7 @@ impl Package {
     }
 
     /// The groups this package is in.
-    pub fn groups(&self) -> impl Iterator<Item=&str> {
+    pub fn groups(&self) -> impl Iterator<Item = &str> {
         self.desc.groups.iter().map(|v| v.as_ref())
     }
 
@@ -134,37 +165,37 @@ impl Package {
     }
 
     /// Which packages this package replaces.
-    pub fn replaces(&self) -> impl Iterator<Item=&str> {
+    pub fn replaces(&self) -> impl Iterator<Item = &str> {
         self.desc.replaces.iter().map(|v| v.as_ref())
     }
 
     /// Which packages this package depends on.
-    pub fn depends(&self) -> impl Iterator<Item=&str> {
+    pub fn depends(&self) -> impl Iterator<Item = &str> {
         self.desc.depends.iter().map(|v| v.as_ref())
     }
 
     /// Which packages this package optionally depends on.
-    pub fn optional_depends(&self) -> impl Iterator<Item=&str> {
+    pub fn optional_depends(&self) -> impl Iterator<Item = &str> {
         self.desc.optional_depends.iter().map(|v| v.as_ref())
     }
 
     /// Which packages this package conflicts with.
-    pub fn conflicts(&self) -> impl Iterator<Item=&str> {
+    pub fn conflicts(&self) -> impl Iterator<Item = &str> {
         self.desc.conflicts.iter().map(|v| v.as_ref())
     }
 
     /// Which virtual packages this package provides.
-    pub fn provides(&self) -> impl Iterator<Item=&str> {
+    pub fn provides(&self) -> impl Iterator<Item = &str> {
         self.desc.provides.iter().map(|v| v.as_ref())
     }
 
     /// An iterator over the paths of all files in this package.
-    pub fn file_names(&self) -> impl Iterator<Item=&Path> {
+    pub fn file_names(&self) -> impl Iterator<Item = &Path> {
         self.files().map(|v| v.path())
     }
 
     /// An iterator over metadata for all files in this package.
-    pub fn files(&self) -> impl Iterator<Item=&Entry> {
+    pub fn files(&self) -> impl Iterator<Item = &Entry> {
         self.files.iter()
     }
 
@@ -182,7 +213,7 @@ impl Package {
             let md = match root.join(file.path()).metadata() {
                 Ok(md) => md,
                 Err(ref e) if e.kind() == io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(e)
+                Err(e) => return Err(e),
             };
             acc += md.len();
         }
@@ -196,7 +227,10 @@ impl Package {
     pub fn validate(&self) -> io::Result<Vec<ValidationError>> {
         info!("validating package {}", self.name());
         let mut errors = Vec::new();
-        let handle = self.handle.upgrade().expect("the alpm instance no longer exists");
+        let handle = self
+            .handle
+            .upgrade()
+            .expect("the alpm instance no longer exists");
         let root_path = &handle.borrow().root_path;
         for file in self.files() {
             let path = root_path.join(file.path());
@@ -205,9 +239,9 @@ impl Package {
                 Ok(md) => md,
                 Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                     errors.push(ValidationError::FileNotFound(format!("{}", path.display())));
-                    continue
-                },
-                Err(e) => return Err(e)
+                    continue;
+                }
+                Err(e) => return Err(e),
             };
             // Check file type
             if let Some(ty) = file.file_type() {
@@ -215,22 +249,28 @@ impl Package {
                     (FileType::File, FileType::File) => (),
                     (FileType::File, ty) => {
                         errors.push(ValidationError::wrong_type(
-                                format!("{}", file.path().display()),
-                                FileType::File, ty));
-                    },
+                            format!("{}", file.path().display()),
+                            FileType::File,
+                            ty,
+                        ));
+                    }
                     (FileType::Directory, FileType::Directory) => (),
                     (FileType::Directory, ty) => {
                         errors.push(ValidationError::wrong_type(
-                                format!("{}", file.path().display()),
-                                FileType::Directory, ty));
-                    },
+                            format!("{}", file.path().display()),
+                            FileType::Directory,
+                            ty,
+                        ));
+                    }
                     (FileType::SymbolicLink, FileType::SymbolicLink) => (),
                     (FileType::SymbolicLink, ty) => {
                         errors.push(ValidationError::wrong_type(
-                                format!("{}", file.path().display()),
-                                FileType::SymbolicLink, ty));
-                    },
-                    _ => ()
+                            format!("{}", file.path().display()),
+                            FileType::SymbolicLink,
+                            ty,
+                        ));
+                    }
+                    _ => (),
                 }
             }
             // Check size
@@ -239,7 +279,7 @@ impl Package {
                     errors.push(ValidationError::wrong_size(
                         format!("{}", file.path().display()),
                         size,
-                        md.len()
+                        md.len(),
                     ));
                 }
             }
@@ -284,7 +324,7 @@ struct PackageDesc {
 #[derive(Debug, Deserialize, Serialize)]
 struct Files {
     #[serde(default)]
-    files: Vec<PathBuf>
+    files: Vec<PathBuf>,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
@@ -360,14 +400,20 @@ pub enum ValidationError {
     #[fail(display = "file missing at \"{}\"", _0)]
     FileNotFound(String),
     /// A file is the wrong type
-    #[fail(display = "database says file \"{}\" should be a {}, found a {}", filename, expected, actual)]
+    #[fail(
+        display = "database says file \"{}\" should be a {}, found a {}",
+        filename, expected, actual
+    )]
     WrongType {
         filename: String,
         expected: FileType,
         actual: FileType,
     },
     /// A file is the wrong size
-    #[fail(display = "database says file \"{}\" should be {} bytes, found {}", filename, expected, actual)]
+    #[fail(
+        display = "database says file \"{}\" should be {} bytes, found {}",
+        filename, expected, actual
+    )]
     WrongSize {
         filename: String,
         expected: u64,
@@ -381,24 +427,27 @@ impl ValidationError {
         ValidationError::FileNotFound(s.into())
     }
     /// Constructor for WrongType variant
-    fn wrong_type(filename: impl Into<String>,
-                  expected: impl Into<FileType>,
-                  actual: impl Into<FileType>) -> ValidationError {
+    fn wrong_type(
+        filename: impl Into<String>,
+        expected: impl Into<FileType>,
+        actual: impl Into<FileType>,
+    ) -> ValidationError {
         ValidationError::WrongType {
             filename: filename.into(),
             expected: expected.into(),
-            actual: actual.into()
+            actual: actual.into(),
         }
     }
     /// Constructor for WrongSize variant
-    fn wrong_size(filename: impl Into<String>,
-                  expected: impl Into<u64>,
-                  actual: impl Into<u64>) -> ValidationError {
+    fn wrong_size(
+        filename: impl Into<String>,
+        expected: impl Into<u64>,
+        actual: impl Into<u64>,
+    ) -> ValidationError {
         ValidationError::WrongSize {
             filename: filename.into(),
             expected: expected.into(),
-            actual: actual.into()
+            actual: actual.into(),
         }
     }
 }
-

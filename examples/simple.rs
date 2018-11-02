@@ -10,18 +10,19 @@ extern crate alpm;
 extern crate clap;
 extern crate env_logger;
 extern crate failure;
-extern crate log;
-extern crate users;
 extern crate humansize;
+extern crate log;
 extern crate progress;
+extern crate users;
 
-use alpm::{Alpm, Error};
 use alpm::db::LocalDbPackage as Package;
+use alpm::{Alpm, Error};
+use clap::{App, AppSettings, Arg, ArgMatches};
 use failure::Fail;
+use humansize::{file_size_opts::BINARY, FileSize};
 use log::LevelFilter;
-use humansize::{FileSize, file_size_opts::BINARY};
-use clap::{Arg, App, ArgMatches, AppSettings};
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -72,11 +73,12 @@ fn run(opts: Opts) -> Result<(), Error> {
             let mut bar = progress::Bar::new();
 
             local_db.packages(|pkg| -> Result<(), Error> {
-                bar.set_job_title(&format!("Loading size for pkg {} of {} ({}) ...", idx + 1, total, pkg.name()));
+                let title = format!("Pkg {} of {} ({}) ", idx + 1, total, pkg.name());
+                bar.set_job_title(&shorten_ellipsis(&title, 40));
                 reported_size += pkg.size();
                 size_on_disk += pkg.size_on_disk()?;
                 idx += 1;
-                bar.reach_percent(((idx * 100) / total ) as i32);
+                bar.reach_percent(((idx * 100) / total) as i32);
                 // bail early
                 /*
                 if idx > 100 {
@@ -86,7 +88,10 @@ fn run(opts: Opts) -> Result<(), Error> {
                 Ok(())
             })?;
 
-            println!("Reported size: {}", reported_size.file_size(BINARY).unwrap());
+            println!(
+                "Reported size: {}",
+                reported_size.file_size(BINARY).unwrap()
+            );
             println!("Actual size: {}", size_on_disk.file_size(BINARY).unwrap());
         }
         Cmd::Validate => {
@@ -114,12 +119,12 @@ fn run(opts: Opts) -> Result<(), Error> {
     core.add_server(server_url("core", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     core.synchronize(false)?;
-
+    
     let mut extra = alpm.sync_database("extra")?;
     extra.add_server(server_url("extra", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     extra.synchronize(false)?;
-
+    
     extra.add_server(&server_url("extra", "x86_64"))?;
     community.add_server(&server_url("community", "x86_64"))?;
     multilib.add_server(&server_url("multilib", "x86_64"))?;
@@ -152,8 +157,10 @@ fn print_packages_with_no_reason(alpm: &Alpm) -> Result<(), Error> {
         acc += pkg.size();
     }
     println!();
-    println!("Total disk space from packages without install reason: {}",
-             acc.file_size(BINARY).unwrap());
+    println!(
+        "Total disk space from packages without install reason: {}",
+        acc.file_size(BINARY).unwrap()
+    );
     Ok(())
 }
 
@@ -166,7 +173,10 @@ fn print_total_package_size(alpm: &Alpm) -> Result<(), Error> {
         Ok(())
     })?;
 
-    println!("Total disk space from packages: {}", total_usage.file_size(BINARY).unwrap());
+    println!(
+        "Total disk space from packages: {}",
+        total_usage.file_size(BINARY).unwrap()
+    );
     Ok(())
 }
 
@@ -178,7 +188,7 @@ impl Opts {
                 1 => LevelFilter::Info,
                 _ => LevelFilter::Debug,
             },
-            subcommand: Cmd::from_args(matches)
+            subcommand: Cmd::from_args(matches),
         }
     }
 }
@@ -186,15 +196,11 @@ impl Opts {
 impl Cmd {
     fn from_args<'a>(matches: ArgMatches<'a>) -> Cmd {
         match matches.subcommand() {
-            ("disk", Some(sub_m)) => {
-                Cmd::DiskUsageReport {
-                    human: sub_m.is_present("human")
-                }
+            ("disk", Some(sub_m)) => Cmd::DiskUsageReport {
+                human: sub_m.is_present("human"),
             },
-            ("validate", Some(sub_m)) => {
-                Cmd::Validate
-            },
-            _ => unreachable!()
+            ("validate", Some(sub_m)) => Cmd::Validate,
+            _ => unreachable!(),
         }
     }
 }
@@ -209,21 +215,22 @@ fn main() {
         .version(crate_version!())
         .about("A command line tool showing off some of the functionality of the library.")
         .setting(AppSettings::SubcommandRequired)
-        .arg(Arg::with_name("verbosity")
-            .long("verbose")
-            .short("v")
-            .multiple(true)
-            .help("how verbose to be when logging"))
-        .subcommand(App::new("disk")
-            .about("Prints a disk-usage report.")
-            .arg(Arg::with_name("human")
-                 .short("r")
-                 .long("human-readable")
-                 .help("if present, disk sized will be in human-readable form"))
-            )
-        .subcommand(App::new("validate")
-            .about("Check all packages against the local database.")
-            )
+        .arg(
+            Arg::with_name("verbosity")
+                .long("verbose")
+                .short("v")
+                .multiple(true)
+                .help("how verbose to be when logging"),
+        )
+        .subcommand(
+            App::new("disk").about("Prints a disk-usage report.").arg(
+                Arg::with_name("human")
+                    .short("r")
+                    .long("human-readable")
+                    .help("if present, disk sized will be in human-readable form"),
+            ),
+        )
+        .subcommand(App::new("validate").about("Check all packages against the local database."))
         .get_matches();
     let opts = Opts::from_args(args);
 
@@ -256,32 +263,36 @@ fn main() {
 
 /// Just makes a valid server url for given database/os.
 fn server_url(database: impl AsRef<str>, os: impl AsRef<str>) -> String {
-    format!("http://mirror.bytemark.co.uk/archlinux/{}/os/{}", database.as_ref(), os.as_ref())
+    format!(
+        "http://mirror.bytemark.co.uk/archlinux/{}/os/{}",
+        database.as_ref(),
+        os.as_ref()
+    )
 }
 
 /// Make a directory with a base installation at /tmp/alpm-test
 fn make_base() {
-
     let base_path = Path::new(BASE_PATH);
     if base_path.is_file() {
         fs::remove_file(base_path).unwrap();
     }
-    if ! base_path.exists() {
+    if !base_path.exists() {
         let user = users::get_current_username().unwrap();
         let group = users::get_current_groupname().unwrap();
 
         fs::create_dir_all(BASE_PATH).unwrap();
         let mut cmd = Command::new("sudo");
         cmd.args(&["pacstrap", BASE_PATH, "base"]);
-        if ! run_command(cmd) {
+        if !run_command(cmd) {
             cleanup_and_fail();
         }
         let mut chown = Command::new("sudo");
-        chown.arg("chown")
+        chown
+            .arg("chown")
             .arg("-R")
             .arg(format!("{}:{}", user, group))
             .arg(BASE_PATH);
-        if ! run_command(chown) {
+        if !run_command(chown) {
             cleanup_and_fail();
         }
     }
@@ -297,14 +308,29 @@ fn cleanup_and_fail() {
 /// Run a command and panic on bad exit status
 fn run_command(mut cmd: Command) -> bool {
     use std::process::Stdio;
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
     let status = cmd.status().unwrap();
     if status.success() {
         true
     } else {
-        eprintln!("command {:?} failed with error code {:?}", cmd, status.code());
+        eprintln!(
+            "command {:?} failed with error code {:?}",
+            cmd,
+            status.code()
+        );
         false
     }
 }
 
+/// Take some text and shorten it
+fn shorten_ellipsis<'a>(input: &'a str, len: usize) -> Cow<'a, str> {
+    if input.len() > len {
+        let mut new_len = len - 4;
+        while !input.is_char_boundary(new_len) {
+            new_len -= 1;
+        }
+        Cow::Owned(format!("{} ...", &input[0..new_len]))
+    } else {
+        Cow::Borrowed(input)
+    }
+}

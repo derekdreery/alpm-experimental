@@ -1,8 +1,8 @@
 use std::borrow::Cow;
-use std::cell::{Ref, RefMut, RefCell};
-use std::collections::{HashSet, HashMap, hash_set};
-use std::convert::TryInto;
+use std::cell::{Ref, RefCell, RefMut};
 use std::cmp;
+use std::collections::{hash_set, HashMap, HashSet};
+use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Read, Write};
@@ -10,13 +10,13 @@ use std::ops::Deref;
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
 
-use db::{SYNC_DB_DIR, LOCAL_DB_NAME, DbStatus, DbUsage, SignatureLevel};
-use error::{ErrorKind, Error};
-use Handle;
+use db::{DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME, SYNC_DB_DIR};
+use error::{Error, ErrorKind};
 use util::UrlOrStr;
+use Handle;
 
 use atoi::atoi;
-use failure::{Fail, ResultExt, err_msg};
+use failure::{err_msg, Fail, ResultExt};
 use fs2::FileExt;
 use reqwest::{self, Url};
 
@@ -27,35 +27,44 @@ pub struct SyncDatabase {
     // Cache name and path
     name: String,
     path: PathBuf,
-    inner: WeakRc<RefCell<SyncDatabaseInner>>
+    inner: WeakRc<RefCell<SyncDatabaseInner>>,
 }
 
 impl SyncDatabase {
-
     #[inline]
     pub(crate) fn new(db: &Rc<RefCell<SyncDatabaseInner>>, name: String, path: PathBuf) -> Self {
-        SyncDatabase { inner: Rc::downgrade(db), name, path }
+        SyncDatabase {
+            inner: Rc::downgrade(db),
+            name,
+            path,
+        }
     }
 
     /// Get a copy of the registered servers for this database.
     #[inline]
     pub fn servers<'a>(&'a self) -> Result<Vec<Url>, Error> {
-        Ok(self.upgrade()?.borrow_mut().servers.iter().map(|url| url.clone()).collect())
+        Ok(self
+            .upgrade()?
+            .borrow_mut()
+            .servers
+            .iter()
+            .map(|url| url.clone())
+            .collect())
     }
 
     /// Add server
     #[inline]
     pub fn add_server<U>(&mut self, url: U) -> Result<(), Error>
     where
-        UrlOrStr: From<U>
+        UrlOrStr: From<U>,
     {
         self.upgrade()?.borrow_mut().add_server(url)
     }
 
     /// Remove the server with the given url, if present
     pub fn remove_server<U>(&mut self, url: U) -> Result<(), Error>
-        where
-            UrlOrStr: From<U>
+    where
+        UrlOrStr: From<U>,
     {
         self.upgrade()?.borrow_mut().remove_server(url)
     }
@@ -123,7 +132,6 @@ pub struct SyncDatabaseInner {
 }
 
 impl SyncDatabaseInner {
-
     /// Create a new sync db instance
     ///
     /// The name of this database must not match LOCAL_DB_NAME
@@ -131,14 +139,17 @@ impl SyncDatabaseInner {
     /// # Panics
     ///
     /// This function panics if a SyncDatabase already exists with the given name
-    pub(crate) fn new(handle: Rc<RefCell<Handle>>,
-                      name: SyncDbName,
-                      sig_level: SignatureLevel) -> SyncDatabaseInner
-    {
+    pub(crate) fn new(
+        handle: Rc<RefCell<Handle>>,
+        name: SyncDbName,
+        sig_level: SignatureLevel,
+    ) -> SyncDatabaseInner {
         let handle_ref = handle.borrow();
         // This is the caller's responsibility.
-        assert!(! handle_ref.sync_database_registered(&name),
-                "internal error - database already exists");
+        assert!(
+            !handle_ref.sync_database_registered(&name),
+            "internal error - database already exists"
+        );
         let db_filename = name.filename(&handle_ref.database_extension);
         let path = handle_ref.database_path.join(db_filename);
         drop(handle_ref);
@@ -153,7 +164,6 @@ impl SyncDatabaseInner {
         }
     }
 
-
     /// Get the registered servers for this database.
     #[inline]
     fn servers(&self) -> &HashSet<Url> {
@@ -162,17 +172,16 @@ impl SyncDatabaseInner {
 
     /// Add server
     pub fn add_server<U>(&mut self, url: U) -> Result<(), Error>
-        where
-            UrlOrStr: From<U>
+    where
+        UrlOrStr: From<U>,
     {
         // Convert to url
-        let mut url = UrlOrStr::from(url).into_url()
-            .map_err(|(s, e)| {
-                e.context(ErrorKind::CannotAddServerToDatabase {
-                    url: format!("{}", s),
-                    database: self.name.to_string(),
-                })
-            })?;
+        let mut url = UrlOrStr::from(url).into_url().map_err(|(s, e)| {
+            e.context(ErrorKind::CannotAddServerToDatabase {
+                url: format!("{}", s),
+                database: self.name.to_string(),
+            })
+        })?;
         // Check last char is a '/', otherwise we'll lose part of it when we add the database name
         match url.path().chars().next_back() {
             Some('/') => (),
@@ -180,34 +189,42 @@ impl SyncDatabaseInner {
                 let mut path = url.path().to_owned();
                 path.push('/');
                 url.set_path(&path);
-            },
+            }
         };
-        debug!(r#"adding server with url "{}" from database "{}"."#, url, self.name);
-        if ! self.servers.insert(url.clone()) {
-            warn!(r#"server with url "{}" was already present in database "{}"."#,
-                  url, self.name);
+        debug!(
+            r#"adding server with url "{}" from database "{}"."#,
+            url, self.name
+        );
+        if !self.servers.insert(url.clone()) {
+            warn!(
+                r#"server with url "{}" was already present in database "{}"."#,
+                url, self.name
+            );
         }
         Ok(())
     }
 
     /// Remove the server with the given url, if present
     pub fn remove_server<U>(&mut self, url: U) -> Result<(), Error>
-        where
-            UrlOrStr: From<U>
+    where
+        UrlOrStr: From<U>,
     {
-        let url = UrlOrStr::from(url).into_url()
-            .map_err(|(s, e)| {
-                e.context(ErrorKind::CannotAddServerToDatabase {
-                    url: format!("{}", s),
-                    database: self.name.to_string(),
-                })
-            })?;
-        debug!(r#"removing server with url "{}" from database "{}"."#,
-               url, self.name);
+        let url = UrlOrStr::from(url).into_url().map_err(|(s, e)| {
+            e.context(ErrorKind::CannotAddServerToDatabase {
+                url: format!("{}", s),
+                database: self.name.to_string(),
+            })
+        })?;
+        debug!(
+            r#"removing server with url "{}" from database "{}"."#,
+            url, self.name
+        );
 
-        if ! self.servers.remove(&url) {
-            warn!(r#"server with url "{}" was not present in database "{}"."#,
-                  url, self.name);
+        if !self.servers.remove(&url) {
+            warn!(
+                r#"server with url "{}" was not present in database "{}"."#,
+                url, self.name
+            );
         }
         Ok(())
     }
@@ -226,8 +243,7 @@ impl SyncDatabaseInner {
     ///
     /// Returns true if the database is valid, false otherwise
     fn is_valid(&self, md: fs::Metadata) -> bool {
-
-        if ! md.is_file() {
+        if !md.is_file() {
             return false;
         }
         // todo check signature
@@ -240,20 +256,21 @@ impl SyncDatabaseInner {
 
         // check if database is missing
         let metadata = match fs::metadata(&self.path) {
-            Err(ref e) if e.kind() == io::ErrorKind::NotFound =>
-                return Ok(DbStatus::Missing),
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => return Ok(DbStatus::Missing),
             Err(e) => return Err(e.into()),
-            Ok(md) => md
+            Ok(md) => md,
         };
 
-        Ok(DbStatus::Exists { valid: self.is_valid(metadata) })
+        Ok(DbStatus::Exists {
+            valid: self.is_valid(metadata),
+        })
     }
 
     /// Synchronize the database with any external sources.
     fn synchronize(&mut self, force: bool) -> Result<(), Error> {
+        use chrono::{DateTime, Utc};
         use reqwest::header::IF_MODIFIED_SINCE;
         use reqwest::StatusCode;
-        use chrono::{DateTime, Utc};
         use std::time::SystemTime;
 
         debug!(r#"Updating sync database "{}"."#, self.name);
@@ -265,14 +282,14 @@ impl SyncDatabaseInner {
         let mut force = force;
         match self.status()? {
             DbStatus::Exists { valid: true } => (),
-            _ => { force = true; }
+            _ => {
+                force = true;
+            }
         };
 
         // todo this possibly isn't how arch works - it may get the last update time from inside
         // the db somehow
-        let modified = fs::metadata(&self.path)
-            .and_then(|md| md.modified())
-            .ok();
+        let modified = fs::metadata(&self.path).and_then(|md| md.modified()).ok();
 
         for server in self.servers.iter() {
             let filename = self.name.filename(&handle_ref.database_extension);
@@ -281,7 +298,7 @@ impl SyncDatabaseInner {
             let mut request = handle_ref.http_client.get(url);
             if let Some(modified) = modified {
                 debug!("Database last updated at {:?}", modified);
-                if ! force {
+                if !force {
                     // Set If-Modified-Since header to avoid unnecessary download.
                     let modified = <DateTime<Utc> as From<SystemTime>>::from(modified);
                     let modified = format!("{}", modified.format(HTTP_DATE_FORMAT));
@@ -294,30 +311,33 @@ impl SyncDatabaseInner {
                     // We're done
                     debug!("Server reports db not modified - finishing update.");
                     return Ok(());
-                },
+                }
                 StatusCode::OK => (),
                 code => {
-                    warn!("Unexpected code {} while updating database {} - bailing",
-                          code, self.name);
+                    warn!(
+                        "Unexpected code {} while updating database {} - bailing",
+                        code, self.name
+                    );
                     return Ok(());
                 }
             }
             let mut db_file_opts = fs::OpenOptions::new();
-            db_file_opts
-                .create(true)
-                .write(true)
-                .truncate(true);
+            db_file_opts.create(true).write(true).truncate(true);
             let mut db_file = db_file_opts.open(&*self.path)?;
             match db_file.try_lock_exclusive() {
                 Ok(_) => Ok(()),
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    warn!("database {} is in use, blocking on request for exclusive access",
-                          self.name);
+                    warn!(
+                        "database {} is in use, blocking on request for exclusive access",
+                        self.name
+                    );
                     db_file.lock_exclusive()
-                },
-                Err(e) => Err(e)
+                }
+                Err(e) => Err(e),
             }?;
-            let len = response.copy_to(&mut db_file).context(ErrorKind::UnexpectedReqwest)?;
+            let len = response
+                .copy_to(&mut db_file)
+                .context(ErrorKind::UnexpectedReqwest)?;
             debug!("Wrote {} bytes to db file {}", len, self.path.display());
         }
         Ok(())
@@ -349,8 +369,9 @@ impl SyncDbName {
     pub(crate) fn new(name: impl AsRef<str>) -> Result<SyncDbName, ErrorKind> {
         let name = name.as_ref();
         let db_name = match name {
-            name if name == LOCAL_DB_NAME =>
-                return Err(ErrorKind::InvalidDatabaseName(name.to_owned())),
+            name if name == LOCAL_DB_NAME => {
+                return Err(ErrorKind::InvalidDatabaseName(name.to_owned()))
+            }
             name => SyncDbName(name.to_owned()),
         };
         if db_name.is_valid() {

@@ -1,9 +1,9 @@
 //! Functionality relating to alpm databases (local and sync).
 use std::borrow::Cow;
 use std::cell::{Ref, RefCell};
-use std::collections::{HashSet, HashMap};
-use std::convert::TryInto;
 use std::cmp;
+use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Read, Write};
@@ -11,17 +11,17 @@ use std::ops::Deref;
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
 
-use error::{ErrorKind, Error};
-use Handle;
 use atoi::atoi;
-use failure::{Fail, ResultExt, err_msg};
+use error::{Error, ErrorKind};
+use failure::{err_msg, Fail, ResultExt};
 use fs2::FileExt;
+use Handle;
 
 mod local;
 mod sync;
 
+pub(crate) use self::local::LocalDatabaseInner;
 pub use self::local::{LocalDatabase, LocalDbPackage};
-pub(crate) use self::local::{LocalDatabaseInner};
 pub use self::sync::SyncDatabase;
 pub(crate) use self::sync::{SyncDatabaseInner, SyncDbName};
 
@@ -137,9 +137,7 @@ mod tests {
         let base_path2 = "/var/lib/pacman";
         let ext = "db";
 
-        let tests = vec![
-            ("sync1", "/var/lib/pacman/sync/sync1.db"),
-        ];
+        let tests = vec![("sync1", "/var/lib/pacman/sync/sync1.db")];
         for (db_name, target) in tests {
             let db_name = SyncDbName::new(db_name).unwrap();
             let target = Path::new(target);
