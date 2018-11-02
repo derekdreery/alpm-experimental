@@ -13,6 +13,7 @@ extern crate failure;
 extern crate log;
 extern crate users;
 extern crate humansize;
+extern crate progress;
 
 use alpm::{Alpm, Error};
 use alpm::db::LocalDbPackage as Package;
@@ -63,11 +64,34 @@ fn run(opts: Opts) -> Result<(), Error> {
 
     match opts.subcommand {
         Cmd::DiskUsageReport { human } => {
-            print_packages_with_no_reason(&alpm)?;
-            print_total_package_size(&alpm)?;
+            let local_db = alpm.local_database();
+            let mut reported_size = 0;
+            let mut size_on_disk = 0;
+            let mut idx = 0;
+            let total = local_db.count();
+            let mut bar = progress::Bar::new();
+
+            local_db.packages(|pkg| -> Result<(), Error> {
+                bar.set_job_title(&format!("Loading size for pkg {} of {} ({}) ...", idx + 1, total, pkg.name()));
+                reported_size += pkg.size();
+                size_on_disk += pkg.size_on_disk()?;
+                idx += 1;
+                bar.reach_percent(((idx * 100) / total ) as i32);
+                // bail early
+                /*
+                if idx > 100 {
+                    return Err(alpm::ErrorKind::UseAfterDrop.into());
+                }
+                */
+                Ok(())
+            })?;
+
+            println!("Reported size: {}", reported_size.file_size(BINARY).unwrap());
+            println!("Actual size: {}", size_on_disk.file_size(BINARY).unwrap());
         }
         Cmd::Validate => {
             let local_db = alpm.local_database();
+
             let mut errors = HashMap::with_capacity(local_db.count());
             local_db.packages(|pkg| -> Result<(), Error> {
                 let pkg_errors = pkg.validate()?;
@@ -206,10 +230,9 @@ fn main() {
     // Make logging nice
     let mut builder = env_logger::Builder::from_default_env();
     builder
-        .filter_level(opts.verbosity)
-        .filter_module("tokio_reactor", LevelFilter::Warn)
-        .filter_module("tokio_core", LevelFilter::Warn)
-        .filter_module("hyper", LevelFilter::Warn)
+        .filter_level(LevelFilter::Warn)
+        .filter_module("alpm", opts.verbosity)
+        .filter_module("simple", opts.verbosity)
         .init();
 
     if let Err(e) = run(opts) {

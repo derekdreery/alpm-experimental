@@ -168,24 +168,23 @@ impl Package {
         self.files.iter()
     }
 
-    /// The total amount of disk space that this package will take up
-    pub fn total_size(&self) -> Result<u64, io::Error> {
+    /// Get the number of files in the package
+    pub fn files_count(&self) -> usize {
+        self.files.len()
+    }
+
+    /// The amount of disk space that this package takes up on disk
+    pub fn size_on_disk(&self) -> Result<u64, io::Error> {
         let mut acc = 0;
+        let handle = self.handle.upgrade().unwrap();
+        let root = &handle.borrow().root_path;
         for file in self.files() {
-            // some files should be skipped as they are not installed
-            if file.path() == Path::new("./.PKGINFO")
-                || file.path() == Path::new("./.BUILDINFO")
-                || file.path() == Path::new("./.INSTALL")
-                // also skip directories, links etc.
-                || ! (file.file_type() == Some(mtree::FileType::File))
-            {
-                continue;
-            }
-            match file.size() {
-                Some(val) => { acc += val },
-                None => { warn!("file {} does not have a size in its mtree metadata",
-                                file.path().display()); }
-            }
+            let md = match root.join(file.path()).metadata() {
+                Ok(md) => md,
+                Err(ref e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e)
+            };
+            acc += md.len();
         }
         Ok(acc)
     }

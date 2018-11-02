@@ -2,59 +2,49 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::time::SystemTime;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::de::{self, Visitor};
-/*
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Package {
-    pub name: String,
-    pub version: String,
-    pub base: Option<String>,
-    #[serde(rename = "desc")]
-    pub description: String,
-    #[serde(default)]
-    pub groups: Vec<String>,
-    pub url: String,
-    pub license: String,
-    pub arch: String,
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct PackageData {
+    path: PathBuf,
+    name: String,
+    version: String,
+    base: Option<String>,
+    description: String,
+    // We require this be present even if empty as it allows protocols that rely on knowing layout.
+    groups: Vec<String>,
+    url: String,
+    license: Option<String>,
+    arch: String,
     //build_date: SystemTime,
     //install_date: SystemTime,
-    pub packager: String,
-    pub reason: Option<Reason>,
-    pub validation: Vec<Validation>,
-    pub size: u64,
-    #[serde(default)]
-    pub replaces: Vec<String>,
-    #[serde(default)]
-    pub depends: Vec<String>,
-    #[serde(rename = "optdepends")]
-    #[serde(default)]
-    pub optional_depends: Vec<String>,
-    #[serde(default)]
-    pub conflicts: Vec<String>,
-    #[serde(default)]
-    pub provides: Vec<String>,
+    packager: String,
+    reason: Reason,
+    size: u64,
+    replaces: Vec<String>,
+    depends: Vec<String>,
+    optional_depends: Vec<String>,
+    conflicts: Vec<String>,
+    provides: Vec<String>,
+    files: Vec<PackageFile>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct PackageFile;
+
+/// Different possible validation methods
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
 pub enum Validation {
-    #[serde(rename = "none")]
-    None,
-    #[serde(rename = "md5")]
-    Md5,
-    #[serde(rename = "sha256")]
-    Sha256,
-    #[serde(rename = "pgp")]
-    Pgp,
+    //Sha256(Array64<u8>),
+    // TODO Pgp,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
 pub enum Reason {
     /// This package was explicitally installed
-    #[serde(rename = "0")]
     Explicit,
     /// This package was installed because it was required for another package
-    #[serde(rename = "1")]
     Depend,
 }
-*/

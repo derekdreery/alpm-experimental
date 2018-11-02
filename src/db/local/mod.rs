@@ -60,7 +60,7 @@ impl LocalDatabase {
 
     /// Get the number of packages.
     pub fn count(&self) -> usize {
-        self.inner.borrow().package_count
+        self.inner.borrow().package_cache.len()
     }
 
     /// Get a package in this database, if present.
@@ -103,7 +103,7 @@ pub struct LocalDatabaseInner {
     path: PathBuf,
     /// The package cache (HashMap of package name to package version to package, which lazily
     /// gets info from disk)
-    package_cache: HashMap<String, HashMap<String, RefCell<MaybePackage>>>,
+    package_cache: HashMap<PackageKey<'static>, RefCell<MaybePackage>>,
     /// Count of the number of packages (cached)
     package_count: usize,
 }
@@ -148,8 +148,7 @@ impl LocalDatabaseInner {
         let version = version.as_ref();
 
         self.package_cache
-            .get(name)
-            .and_then(|versions| versions.get(version))
+            .get(&PackageKey::from_borrowed(name, version))
             .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?
             .borrow_mut()
             .load(self.handle.clone())
@@ -158,23 +157,17 @@ impl LocalDatabaseInner {
     /// Get the latest version of a package from the database.
     ///
     /// There should only be one version of a package installed at any time,
-    /// so this function is kinda useless.
+    /// so this function is kinda useless, and it's also expensive as it has to traverse the
+    /// hashtable.
     fn package_latest(&self, name: impl AsRef<str>) -> Result<Rc<LocalDbPackage>, Error> {
         let name = name.as_ref();
 
         self.package_cache
-            .get(name)
-            .and_then(|versions| {
-                let mut versions_iter = versions.keys();
-                let mut version = versions_iter.next().unwrap();
-                for v in versions_iter {
-                    if v > version {
-                        version = v;
-                    }
-                }
-                versions.get(version)
-            })
+            .iter()
+            .filter(|(key, value)| key.name == name)
+            .max_by_key(|(key, value)| &key.version)
             .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?
+            .1
             .borrow_mut()
             .load(self.handle.clone())
     }
@@ -185,7 +178,6 @@ impl LocalDatabaseInner {
     {
         for pkg in self.package_cache
             .values()
-            .flat_map(|versions| versions.values())
             .map(|pkg| pkg.borrow_mut().load(self.handle.clone()))
         {
             f(pkg?)?;
@@ -267,7 +259,6 @@ impl LocalDatabaseInner {
     /// Load all package names into the cache, and validate the database
     // The syscalls for this function are a single readdir and a stat per subentry
     pub(crate) fn populate_package_cache(&mut self) -> Result<(), Error> {
-        let mut count = 0;
         debug!(r#"searching for local packages in "{}""#, self.path.display());
         for entry in fs::read_dir(&self.path)? {
             let entry = entry?;
@@ -289,16 +280,14 @@ impl LocalDatabaseInner {
             let (name, version) = split_package_dirname(&file_name)
                 .ok_or(ErrorKind::InvalidLocalPackage(file_name.to_owned()))?;
             debug!(r#"found "{}", version: "{}""#, name, version);
-            let mut versions_map = self.package_cache.entry(name.to_owned())
-                .or_insert(HashMap::new());
-            let new_pkg = MaybePackage::new(path, name, version);
-            if versions_map.insert(version.to_owned(), RefCell::new(new_pkg)).is_some() {
+            if self.package_cache.insert(
+                PackageKey::from_owned(name, version),
+                RefCell::new(MaybePackage::new(path, name, version))
+            ).is_some() {
                 // This should not be possible (since name comes from unique filename)
                 panic!("Found package in localdb with duplicate name/version");
             }
-            count += 1;
         }
-        self.package_count = count;
         Ok(())
     }
 }

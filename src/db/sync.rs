@@ -20,6 +20,8 @@ use failure::{Fail, ResultExt, err_msg};
 use fs2::FileExt;
 use reqwest::{self, Url};
 
+const HTTP_DATE_FORMAT: &str = "%a, %d %b %Y %T GMT";
+
 #[derive(Debug)]
 pub struct SyncDatabase {
     // Cache name and path
@@ -249,8 +251,10 @@ impl SyncDatabaseInner {
 
     /// Synchronize the database with any external sources.
     fn synchronize(&mut self, force: bool) -> Result<(), Error> {
-        use reqwest::header::IfModifiedSince;
+        use reqwest::header::IF_MODIFIED_SINCE;
         use reqwest::StatusCode;
+        use chrono::{DateTime, Utc};
+        use std::time::SystemTime;
 
         debug!(r#"Updating sync database "{}"."#, self.name);
 
@@ -278,17 +282,20 @@ impl SyncDatabaseInner {
             if let Some(modified) = modified {
                 debug!("Database last updated at {:?}", modified);
                 if ! force {
-                    request.header(IfModifiedSince(modified.into()));
+                    // Set If-Modified-Since header to avoid unnecessary download.
+                    let modified = <DateTime<Utc> as From<SystemTime>>::from(modified);
+                    let modified = format!("{}", modified.format(HTTP_DATE_FORMAT));
+                    request = request.header(IF_MODIFIED_SINCE, modified);
                 }
             }
             let mut response = request.send().context(ErrorKind::UnexpectedReqwest)?;
             match response.status() {
-                StatusCode::NotModified => {
+                StatusCode::NOT_MODIFIED => {
                     // We're done
                     debug!("Server reports db not modified - finishing update.");
                     return Ok(());
                 },
-                StatusCode::Ok => (),
+                StatusCode::OK => (),
                 code => {
                     warn!("Unexpected code {} while updating database {} - bailing",
                           code, self.name);
