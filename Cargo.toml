@@ -2,6 +2,7 @@
 name = "alpm"
 version = "0.1.0"
 authors = ["Richard Dodd <richard.dodd@itp-group.co.uk>"]
+edition = "2018"
 
 [dependencies]
 bitflags =  "1"
