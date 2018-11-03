@@ -367,8 +367,7 @@ impl<'a, 'de> MapAccess<'de> for AlpmMap<'a, 'de> {
             return Ok(None);
         }
         // if there is a struct field that matches case-insensitively, use that instead.
-        let real_key = self.de.parse_key()?;
-        let mut key = &real_key;
+        let mut key = self.de.parse_key()?;
         for field in self.fields {
             if field.eq_ignore_ascii_case(key) {
                 key = &field;
@@ -751,7 +750,7 @@ impl<'a, 'de> SeqAccess<'de> for AlpmSeq<'a, 'de> {
 
 /// These have to be in a separate module to avoid a name clash for `ErrorKind`
 mod nom_parsers {
-    use nom::IResult;
+    use nom::{do_parse, tag, take_till1, call, IResult};
 
     /*
     /// We need our own is_digit, because nom's version works on u8, not char
@@ -761,17 +760,17 @@ mod nom_parsers {
             _ => false,
         }
     }
-    
+
     named!(pub parse_unsigned(&str) -> &str, recognize!(
         take_while1!(call!(is_digit))
     ));
-    
+
     named!(pub parse_signed(&str) -> &str, recognize!(do_parse!(
         opt!(alt!(tag!("+") | tag!("-"))) >>
         take_while1!(call!(is_digit)) >>
         (())
     )));
-    
+
     named!(pub parse_float(&str) -> &str, recognize!(
         do_parse!(
             opt!(alt!(tag!("+") | tag!("-"))) >>
@@ -783,7 +782,7 @@ mod nom_parsers {
     ));
     */
 
-    pub fn parse_key<'a>(input: &'a str, line_ending: &'static str) -> IResult<&'a str, &'a str> {
+    pub fn parse_key<'a>(input: &'a str, line_ending: &str) -> IResult<&'a str, &'a str> {
         do_parse!(
             input,
             tag!("%")
@@ -821,17 +820,17 @@ mod nom_parsers {
             assert!(!is_digit(*negative));
         }
     }
-    
+
     #[test]
     fn test_parse_unsigned() {
         assert_eq!(parse_unsigned("60 sef"), Ok((" sef", "60")));
     }
-    
+
     #[test]
     fn test_parse_signed() {
         assert_eq!(parse_signed("60 sef"), Ok((" sef", "60")));
     }
-    
+
     #[test]
     fn test_parse_float() {
         assert_eq!(parse_float("60. sef"), Ok((" sef", "60.")));

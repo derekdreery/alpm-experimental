@@ -1,5 +1,5 @@
 // todo I need to think more about whether we can just use types from gpgme more.
-use failure::{err_msg, Fail, ResultExt};
+use failure::{err_msg, format_err, Fail, ResultExt};
 use gpgme::{self, KeyAlgorithm, Protocol};
 use std::ffi::OsString;
 use std::fs::File;
@@ -65,7 +65,7 @@ pub fn init(gpg_directory: impl AsRef<Path>) -> Result<(), Error> {
 
     // Setup gpg
     let gpg_handle = gpgme::init();
-    debug!("using gpg version {}", gpg_handle.version());
+    log::debug!("using gpg version {}", gpg_handle.version());
     gpg_handle
         .check_engine_version(Protocol::OpenPgp)
         .context(ErrorKind::Gpgme)?;
@@ -76,22 +76,22 @@ pub fn init(gpg_directory: impl AsRef<Path>) -> Result<(), Error> {
         .set_engine_info(Protocol::OpenPgp, none_type_helper, Some(gpg_directory_str))
         .context(ErrorKind::Gpgme)?;
     let engine_infos = gpg_handle.engine_info().context(ErrorKind::Gpgme)?;
-    debug!("gpg engine info:");
+    log::debug!("gpg engine info:");
     for engine_info in engine_infos.iter() {
         let protocol = match engine_info.protocol().name_raw() {
             Some(ref s) => s.to_string_lossy(),
             None => break,
         };
-        debug!("-- {} --", protocol);
-        debug!(
+        log::debug!("-- {} --", protocol);
+        log::debug!(
             "path: {:?}",
             engine_info.path_raw().map(|s| s.to_string_lossy())
         );
-        debug!(
+        log::debug!(
             "home dir: {:?}",
             engine_info.home_dir_raw().map(|s| s.to_string_lossy())
         );
-        debug!(
+        log::debug!(
             "version: {:?}",
             engine_info.version_raw().map(|s| s.to_string_lossy())
         );
@@ -148,28 +148,28 @@ where
         .signatures()
         .enumerate()
         .map(|(idx, sig)| {
-            debug!("-- signature {} --", idx);
-            debug!("summary: {:?}", sig.summary());
+            log::debug!("-- signature {} --", idx);
+            log::debug!("summary: {:?}", sig.summary());
             match sig.status() {
-                Ok(_) => debug!("status: good"),
-                Err(e) => debug!("status: {}", e),
+                Ok(_) => log::debug!("status: good"),
+                Err(e) => log::debug!("status: {}", e),
             };
             if let Some(created) = sig.creation_time() {
-                debug!("created: {:?}", created);
+                log::debug!("created: {:?}", created);
                 if created > SystemTime::now() {
-                    warn!("key timestamp for created at is in the future");
+                    log::warn!("key timestamp for created at is in the future");
                 }
             } else {
-                warn!("no creation timestamp in key");
+                log::warn!("no creation timestamp in key");
             }
             if let Some(expires) = sig.expiration_time() {
-                debug!("expires: {:?}", expires);
+                log::debug!("expires: {:?}", expires);
             } else {
-                debug!("expires: never");
+                log::debug!("expires: never");
             }
-            debug!("validity: {}", sig.validity());
+            log::debug!("validity: {}", sig.validity());
             if let Some(reason) = sig.nonvalidity_reason() {
-                debug!("nonvalidity reason: {}", reason);
+                log::debug!("nonvalidity reason: {}", reason);
             }
             Ok(match sig.key() {
                 Some(key) => {
@@ -185,7 +185,7 @@ where
                                 .context(ErrorKind::UnexpectedSignature(path_str.clone())),
                         }),
                     })?;
-                    debug!("fingerprint: {:?}", fingerprint);
+                    log::debug!("fingerprint: {:?}", fingerprint);
                     // todo I'm getting bored of error handling
                     let user = key.user_ids().next().unwrap();
                     GpgKey {

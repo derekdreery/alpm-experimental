@@ -9,20 +9,16 @@ use failure::Fail;
 
 use reqwest::Url;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct NotADirectory;
 
 impl fmt::Display for NotADirectory {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", error::Error::description(self))
+        f.write_str("path exists and is not a directory")
     }
 }
 
-impl error::Error for NotADirectory {
-    fn description(&self) -> &str {
-        "path exists and is not a directory"
-    }
-}
+impl error::Error for NotADirectory {}
 
 /// Checks a path is a valid accessible directory.
 ///
@@ -38,41 +34,13 @@ pub fn check_valid_directory(path: &Path) -> io::Result<()> {
         }
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
             // try to create and return any error
-            warn!(
+            log::warn!(
                 "directory \"{}\" not found - attempting to create",
                 path.display()
             );
             fs::create_dir_all(path)
         }
         Err(e) => Err(e),
-    }
-}
-
-/// Check a string is a valid db extension.
-///
-/// For now, just allow ascii alphanumeric. This could be relaxed later.
-pub fn is_valid_db_extension(ext: &str) -> bool {
-    ext.chars().all(|ch| ch.is_alphanumeric())
-}
-
-pub struct DerefAsRef<D>(pub D);
-
-impl<D: Deref> AsRef<D::Target> for DerefAsRef<D> {
-    fn as_ref(&self) -> &D::Target {
-        self.0.deref()
-    }
-}
-
-pub struct DerefDerefAsRef<D>(pub D);
-
-impl<D, D2> AsRef<D2::Target> for DerefDerefAsRef<D>
-where
-    D: Deref<Target = D2>,
-    D2: Deref + 'static,
-{
-    fn as_ref(&self) -> &D2::Target {
-        let tmp = self.0.deref();
-        tmp.deref()
     }
 }
 

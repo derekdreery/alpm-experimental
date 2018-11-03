@@ -1,40 +1,7 @@
 //! A library to manipulate a system managed by the Alpm (Arch Linux Package Manager).
 //!
-
-#![feature(nll)]
-#![feature(str_escape)]
-#![feature(try_from)]
-
 #[cfg(not(unix))]
 compile_error!("Only works on unix for now");
-
-extern crate atoi;
-#[macro_use]
-extern crate bitflags;
-extern crate chrono;
-#[macro_use]
-extern crate derivative;
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate failure_derive;
-extern crate fs2;
-extern crate gpgme;
-extern crate itertools;
-extern crate lockfile;
-#[macro_use]
-extern crate log;
-#[macro_use] // pollute away :(
-extern crate nom;
-extern crate reqwest;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate libflate;
-extern crate mtree;
-extern crate tempfile;
-#[cfg(not(windows))]
-extern crate uname;
 
 mod error;
 mod signing;
@@ -94,22 +61,49 @@ impl Alpm {
         Default::default()
     }
 
+    /// Get the local database for this alpm instance.
+    pub fn local_database(&self) -> LocalDatabase {
+        LocalDatabase::new(match &self.handle.borrow().local_database {
+            Some(db) => db.clone(),
+            // The local database is always Some before this can be called.
+            None => unreachable!(),
+        })
+    }
+
+    /// Get a sync database with the given name for this alpm instance.
+    ///
+    /// The database is only valid while the `Alpm` instance is in scope. Once it is dropped, all
+    /// calls to the database will error.
+    pub fn sync_database(&self, name: impl AsRef<str>) -> Result<SyncDatabase, Error> {
+        let name = name.as_ref();
+        let db_name = SyncDbName::new(name)?;
+        let db = self.handle.borrow().sync_databases.get(&db_name).map(Clone::clone);
+        // Second stage to release borrow
+        let db = match db {
+            Some(db) => db,
+            None => self.register_sync_database(&db_name),
+        };
+
+        let name = db_name.into();
+        let path = db.borrow().path.clone();
+        Ok(SyncDatabase::new(&db, name, path))
+    }
+
     /// Register a new sync database
     ///
     /// The name must not match `LOCAL_DB_NAME`.
-    pub fn register_sync_database(&mut self, name: impl AsRef<str>) -> Result<(), Error> {
-        let name = SyncDbName::new(name.as_ref())?;
-        if self.handle.borrow().sync_databases.contains_key(&name) {
-            warn!(r#"database "{}" already registered"#, name);
-        } else {
-            let handle = self.handle.clone();
-            let new_db = SyncDatabaseInner::new(handle, name.clone(), SignatureLevel::default());
-            self.handle
-                .borrow_mut()
-                .sync_databases
-                .insert(name, Rc::new(RefCell::new(new_db)));
-        }
-        Ok(())
+    fn register_sync_database(&self, name: &SyncDbName) -> Rc<RefCell<SyncDatabaseInner>> {
+        let handle = self.handle.clone();
+        let new_db = SyncDatabaseInner::new(handle, name.clone(), SignatureLevel::default());
+        let new_db = Rc::new(RefCell::new(new_db));
+        if self.handle
+            .borrow_mut()
+            .sync_databases
+            .insert(name.clone(), new_db.clone())
+            .is_some() {
+                panic!(r#"internal error: database "{}" already registered"#, name);
+            };
+        new_db
     }
 
     /// Are there any databases already registered with the given name
@@ -128,7 +122,7 @@ impl Alpm {
         let name = match SyncDbName::new(name) {
             Ok(name) => name,
             Err(_) => {
-                warn!(
+                log::warn!(
                     "could not unregister a database with name \"{}\" (name not valid)",
                     name
                 );
@@ -142,57 +136,37 @@ impl Alpm {
             .remove(&name)
             .is_none()
         {
-            warn!(
+            log::warn!(
                 "could not unregister a database with name \"{}\" (not found)",
                 name
             );
         }
     }
 
+    /// Helper function to deregister all sync databases from the alpm instance.
+    ///
+    /// The databases will continue to exist while there are handles to them
+    /// (from `sync_database`).
     pub fn unregister_all_sync_databases(&mut self) {
         self.handle.borrow_mut().sync_databases.clear()
     }
 
-    /// Get the local database for this alpm instance.
-    pub fn local_database(&self) -> LocalDatabase {
-        LocalDatabase::new(match &self.handle.borrow().local_database {
-            Some(db) => db.clone(),
-            // The local database is always Some before this can be called.
-            None => unreachable!(),
-        })
-    }
+    // The following could avoid cloning, but the types are complex and it is unlikely to be a
+    // performance bottleneck
 
-    /// Get a sync database with the given name for this alpm instance.
-    ///
-    /// The database is only valid while the `Alpm` instance is in scope. Once it is dropped, all
-    /// calls to the database will error.
-    pub fn sync_database(&self, name: impl AsRef<str>) -> Result<SyncDatabase, Error> {
-        let name = name.as_ref();
-        let db_name = SyncDbName::new(name)?;
-        let db = match self.handle.borrow().sync_databases.get(&db_name) {
-            Some(handle) => Ok(handle.clone()),
-            None => Err(Error::from(ErrorKind::DatabaseNotFound(name.to_owned()))),
-        }?;
-
-        let name = db_name.into();
-        let path = db.borrow().path.clone();
-        Ok(SyncDatabase::new(&db, name, path))
+    /// Get the parent database path
+    pub fn database_path(&self) -> PathBuf {
+        self.handle.borrow().database_path.clone()
     }
 
     /// Get the parent database path
-    pub fn database_path<'a>(&'a self) -> impl AsRef<Path> + 'a {
-        util::DerefAsRef(Ref::map(self.handle.borrow(), |handle| {
-            &*handle.database_path
-        }))
+    pub fn database_extension(&self) -> String {
+        self.handle.borrow().database_extension.clone()
     }
 
-    /// Get the parent database path
-    pub fn database_extension<'a>(&'a self) -> impl Deref<Target = String> + 'a {
-        Ref::map(self.handle.borrow(), |handle| &handle.database_extension)
-    }
-
-    pub fn root_path<'a>(&'a self) -> impl Deref<Target = PathBuf> + 'a {
-        Ref::map(self.handle.borrow(), |handle| &handle.root_path)
+    /// Get the root of this alpm instance.
+    pub fn root_path(&self) -> PathBuf {
+        self.handle.borrow().root_path.clone()
     }
 }
 
@@ -317,7 +291,7 @@ impl AlpmBuilder {
         let root_path = self.root_path.unwrap_or("C:\\".into());
         #[cfg(not(windows))]
         let root_path = self.root_path.unwrap_or("/".into());
-        debug!("root path: {}", root_path.display());
+        log::debug!("root path: {}", root_path.display());
         util::check_valid_directory(&root_path)
             .context(ErrorKind::BadRootPath(root_path.clone()))?;
 
@@ -331,28 +305,28 @@ impl AlpmBuilder {
             }
         };
 
-        debug!("database path: {}", database_path.display());
+        log::debug!("database path: {}", database_path.display());
         // todo should I be checking database_path is valid here?
 
         let database_extension = self
             .database_extension
             .unwrap_or(DEFAULT_SYNC_DB_EXT.to_owned());
-        if !util::is_valid_db_extension(&database_extension) {
+        if !is_valid_db_extension(&database_extension) {
             return Err(ErrorKind::BadSyncDatabaseExt(database_extension).into());
         }
-        debug!("database extension: .{}", &database_extension);
+        log::debug!("database extension: .{}", &database_extension);
 
         let sync_db_path = database_path.join(SYNC_DB_DIR);
-        debug!("sync database path: {}", sync_db_path.display());
+        log::debug!("sync database path: {}", sync_db_path.display());
         util::check_valid_directory(&sync_db_path)
             .context(ErrorKind::BadSyncDatabasePath(sync_db_path.clone()))?;
 
         // todo
         let gpg_path = root_path.clone();
-        debug!("gpg path: {}", gpg_path.display());
+        log::debug!("gpg path: {}", gpg_path.display());
 
         let lockfile_path = database_path.join(LOCKFILE);
-        debug!("lockfile path: {}", lockfile_path.display());
+        log::debug!("lockfile path: {}", lockfile_path.display());
 
         let lockfile = Lockfile::create(&lockfile_path).map_err(|e| {
             let kind = e.kind();
@@ -364,7 +338,7 @@ impl AlpmBuilder {
         })?;
 
         let _arch = root_path.clone();
-        debug!("gpg path: {}", gpg_path.display());
+        log::debug!("gpg path: {}", gpg_path.display());
 
         // Get architecture of computer
         #[cfg(not(windows))]
@@ -372,7 +346,7 @@ impl AlpmBuilder {
             Some(arch) => arch,
             None => {
                 let info = uname().context(ErrorKind::UnexpectedIo)?;
-                info!("detected arch: {}", &info.machine);
+                log::info!("detected arch: {}", &info.machine);
                 info.machine
             }
         };
@@ -384,7 +358,7 @@ impl AlpmBuilder {
                 "x86_64".into()
             }
         };
-        debug!("arch: {}", &arch);
+        log::debug!("arch: {}", &arch);
 
         signing::init(&gpg_path)?;
 
@@ -416,3 +390,11 @@ impl AlpmBuilder {
         Ok(Alpm { handle })
     }
 }
+
+/// Check a string is a valid db extension.
+///
+/// For now, just allow ascii alphanumeric. This could be relaxed later.
+fn is_valid_db_extension(ext: &str) -> bool {
+    ext.chars().all(|ch| ch.is_alphanumeric())
+}
+

@@ -6,14 +6,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Weak;
 
-use failure::ResultExt;
+use failure::{format_err, ResultExt, Fail};
 use libflate::gzip::Decoder;
 use mtree::{self, Entry, MTree};
+use serde_derive::{Serialize, Deserialize};
 
 use crate::alpm_desc::de;
 use crate::error::{Error, ErrorKind};
 use crate::package::{Package, PackageDescription, Reason, Validation};
 use crate::Handle;
+use derivative::Derivative;
 
 #[derive(Debug, Clone, Derivative)]
 #[derivative(PartialEq, Hash)]
@@ -229,7 +231,7 @@ impl LocalPackage {
     /// There a few different sources of truth for a package. This method (aspires to) make sure
     /// they are all consistent.
     pub fn validate(&self) -> io::Result<Vec<ValidationError>> {
-        info!("validating package {}", self.name());
+        log::info!("validating package {}", self.name());
         let mut errors = Vec::new();
         let handle = self
             .handle

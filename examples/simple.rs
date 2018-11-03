@@ -56,12 +56,10 @@ fn run(opts: Opts) -> Result<(), Error> {
         //.with_root_path(&BASE_PATH)
         .build()?;
 
-    /*
-    alpm.register_sync_database("core")?;
-    alpm.register_sync_database("extra")?;
-    alpm.register_sync_database("community")?;
-    alpm.register_sync_database("multilib")?;
-    */
+    let core = alpm.sync_database("core")?;
+    let extra = alpm.sync_database("extra")?;
+    let community = alpm.sync_database("community")?;
+    let multilib = alpm.sync_database("multilib")?;
 
     match opts.subcommand {
         Cmd::DiskUsageReport { human: _ } => {
@@ -119,12 +117,12 @@ fn run(opts: Opts) -> Result<(), Error> {
     core.add_server(server_url("core", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     core.synchronize(false)?;
-    
+
     let mut extra = alpm.sync_database("extra")?;
     extra.add_server(server_url("extra", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     extra.synchronize(false)?;
-    
+
     extra.add_server(&server_url("extra", "x86_64"))?;
     community.add_server(&server_url("community", "x86_64"))?;
     multilib.add_server(&server_url("multilib", "x86_64"))?;

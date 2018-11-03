@@ -5,12 +5,13 @@
 
 use std::cell::RefCell;
 use std::cmp;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
+use std::borrow::Cow;
 
 use crate::db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME, SYNC_DB_DIR};
 use crate::error::{Error, ErrorKind};
@@ -20,6 +21,8 @@ use crate::Handle;
 use failure::{Fail, ResultExt};
 use fs2::FileExt;
 use reqwest::Url;
+
+//mod package;
 
 const HTTP_DATE_FORMAT: &str = "%a, %d %b %Y %T GMT";
 
@@ -91,31 +94,22 @@ impl SyncDatabase {
 impl Database for SyncDatabase {
     type Pkg = ();
 
-    /// Get the name of the database
-    #[inline]
     fn name(&self) -> &str {
         &self.name
     }
 
-    /// Get the path of this database.
-    #[inline]
     fn path(&self) -> PathBuf {
         self.path.clone()
     }
 
-    /// Get the status of this database.
     fn status(&self) -> Result<DbStatus, Error> {
         self.upgrade()?.borrow().status()
     }
 
-    /*
-    /// Get a package in this database
-    fn package(&self, name: &str) -> Result<Rc<Package>, Error> {
-        unimplemented!();
+    fn count(&self) -> usize {
+        unimplemented!()
     }
-    */
 
-    /// Get a package in this database, if present.
     fn package(
         &self,
         _name: impl AsRef<str>,
@@ -124,7 +118,6 @@ impl Database for SyncDatabase {
         unimplemented!()
     }
 
-    /// Get the latest version of a package in this database, if a version is present.
     fn package_latest<Str>(&self, _name: Str) -> Result<Self::Pkg, Error>
     where
         Str: AsRef<str>,
@@ -132,7 +125,6 @@ impl Database for SyncDatabase {
         unimplemented!()
     }
 
-    /// Run a callback on all packages in the database.
     fn packages<E, F>(&self, _f: F) -> Result<(), E>
     where
         F: FnMut(Self::Pkg) -> Result<(), E>,
@@ -157,10 +149,13 @@ pub struct SyncDatabaseInner {
     servers: HashSet<Url>,
     /// The database path.
     pub path: PathBuf,
-    ///// The package cache (HashMap of package name to package
-    //package_cache: HashMap<String, Package>,
+    /// The package cache (HashMap of package name to package)
+    // Unlike in LocalDatabaseInner we don't have a version, since there is only one version of any
+    // package in a sync repository.
+    package_cache: HashMap<Cow<'static, str>, /*Package*/()>,
+    /// Count of the number of packages (cached)
+    package_count: usize,
 }
-
 impl SyncDatabaseInner {
     /// Create a new sync db instance
     ///
@@ -183,15 +178,17 @@ impl SyncDatabaseInner {
         let db_filename = name.filename(&handle_ref.database_extension);
         let path = handle_ref.database_path.join(db_filename);
         drop(handle_ref);
-        SyncDatabaseInner {
+        let mut db = SyncDatabaseInner {
             handle: Rc::downgrade(&handle),
             name,
             sig_level,
             usage: DbUsage::ALL,
             servers: HashSet::new(),
             path,
-            //package_cache: HashMap::new(),
-        }
+            package_cache: HashMap::new(),
+            package_count: 0
+        };
+        db
     }
 
     /// Get the registered servers for this database.
@@ -221,12 +218,12 @@ impl SyncDatabaseInner {
                 url.set_path(&path);
             }
         };
-        debug!(
+        log::debug!(
             r#"adding server with url "{}" from database "{}"."#,
             url, self.name
         );
         if !self.servers.insert(url.clone()) {
-            warn!(
+            log::warn!(
                 r#"server with url "{}" was already present in database "{}"."#,
                 url, self.name
             );
@@ -245,13 +242,13 @@ impl SyncDatabaseInner {
                 database: self.name.to_string(),
             })
         })?;
-        debug!(
+        log::debug!(
             r#"removing server with url "{}" from database "{}"."#,
             url, self.name
         );
 
         if !self.servers.remove(&url) {
-            warn!(
+            log::warn!(
                 r#"server with url "{}" was not present in database "{}"."#,
                 url, self.name
             );
@@ -261,7 +258,7 @@ impl SyncDatabaseInner {
 
     /// Remove all servers from this database.
     pub fn clear_servers(&mut self) {
-        debug!(r#"removing all servers from database "{}"."#, self.name);
+        log::debug!(r#"removing all servers from database "{}"."#, self.name);
         self.servers.clear()
     }
 
@@ -305,7 +302,7 @@ impl SyncDatabaseInner {
         use reqwest::StatusCode;
         use std::time::SystemTime;
 
-        debug!(r#"Updating sync database "{}"."#, self.name);
+        log::debug!(r#"Updating sync database "{}"."#, self.name);
 
         let handle = self.get_handle()?;
         let handle_ref = handle.borrow();
@@ -325,10 +322,10 @@ impl SyncDatabaseInner {
         for server in self.servers.iter() {
             let filename = self.name.filename(&handle_ref.database_extension);
             let url = server.join(&filename).unwrap();
-            debug!("Requesting update from {}", url);
+            log::debug!("Requesting update from {}", url);
             let mut request = handle_ref.http_client.get(url);
             if let Some(modified) = modified {
-                debug!("Database last updated at {:?}", modified);
+                log::debug!("Database last updated at {:?}", modified);
                 if !force {
                     // Set If-Modified-Since header to avoid unnecessary download.
                     let modified = <DateTime<Utc> as From<SystemTime>>::from(modified);
@@ -340,12 +337,12 @@ impl SyncDatabaseInner {
             match response.status() {
                 StatusCode::NOT_MODIFIED => {
                     // We're done
-                    debug!("Server reports db not modified - finishing update.");
+                    log::debug!("Server reports db not modified - finishing update.");
                     return Ok(());
                 }
                 StatusCode::OK => (),
                 code => {
-                    warn!(
+                    log::warn!(
                         "Unexpected code {} while updating database {} - bailing",
                         code, self.name
                     );
@@ -358,7 +355,7 @@ impl SyncDatabaseInner {
             match db_file.try_lock_exclusive() {
                 Ok(_) => Ok(()),
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    warn!(
+                    log::warn!(
                         "database {} is in use, blocking on request for exclusive access",
                         self.name
                     );
@@ -369,7 +366,7 @@ impl SyncDatabaseInner {
             let len = response
                 .copy_to(&mut db_file)
                 .context(ErrorKind::UnexpectedReqwest)?;
-            debug!("Wrote {} bytes to db file {}", len, self.path.display());
+            log::debug!("Wrote {} bytes to db file {}", len, self.path.display());
         }
         Ok(())
     }
