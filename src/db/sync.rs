@@ -116,7 +116,11 @@ impl Database for SyncDatabase {
     */
 
     /// Get a package in this database, if present.
-    fn package(&self, _name: impl AsRef<str>, _version: impl AsRef<str>) -> Result<Self::Pkg, Error> {
+    fn package(
+        &self,
+        _name: impl AsRef<str>,
+        _version: impl AsRef<str>,
+    ) -> Result<Self::Pkg, Error> {
         unimplemented!()
     }
 

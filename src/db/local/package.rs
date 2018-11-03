@@ -11,8 +11,8 @@ use libflate::gzip::Decoder;
 use mtree::{self, Entry, MTree};
 
 use crate::alpm_desc::de;
-use crate::package::{Package, PackageDescription, Reason, Validation};
 use crate::error::{Error, ErrorKind};
+use crate::package::{Package, PackageDescription, Reason, Validation};
 use crate::Handle;
 
 #[derive(Debug, Clone, Derivative)]
