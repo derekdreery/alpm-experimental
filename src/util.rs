@@ -1,14 +1,10 @@
-use std::cell::{Ref, RefCell};
-use std::collections::HashMap;
 use std::error;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::ops::Deref;
 use std::path::Path;
-use std::rc::Rc;
 
-use error::Error;
 use failure::Fail;
 
 use reqwest::Url;

@@ -1,27 +1,13 @@
 //! Functionality relating to alpm databases (local and sync).
-use std::borrow::Cow;
-use std::cell::{Ref, RefCell};
-use std::cmp;
-use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
-use std::fmt::{self, Display};
-use std::fs;
-use std::io::{self, Read, Write};
-use std::ops::Deref;
-use std::path::{self, Path, PathBuf};
-use std::rc::{Rc, Weak as WeakRc};
 
-use atoi::atoi;
-use error::{Error, ErrorKind};
-use failure::{err_msg, Fail, ResultExt};
-use fs2::FileExt;
-use Handle;
+use error::Error;
+use std::path::PathBuf;
 
 mod local;
 mod sync;
 
 pub(crate) use self::local::LocalDatabaseInner;
-pub use self::local::{LocalDatabase, LocalDbPackage};
+pub use self::local::{LocalDatabase, LocalPackage};
 pub use self::sync::SyncDatabase;
 pub(crate) use self::sync::{SyncDatabaseInner, SyncDbName};
 
@@ -32,50 +18,42 @@ pub const DEFAULT_SYNC_DB_EXT: &str = "db";
 /// The name of the local database.
 pub const LOCAL_DB_NAME: &str = "local";
 
-/*
+/// A trait providing all shared database functionality.
 pub trait Database {
-    type Pkg: Package;
-    type PkgIter: Iterator<Item=Self::Pkg>;
-    type Path: Deref<Target=Path>;
+    type Pkg;
 
     /// Get the name of this database
     fn name(&self) -> &str;
 
     /// Get the path of the root file or directory for this database.
-    fn path(&self) -> Self::Path;
+    fn path(&self) -> PathBuf;
 
     /// Get the status of this database.
     fn status(&self) -> Result<DbStatus, Error>;
 
-    /// Synchronize the database with any external sources.
-    fn synchronize(&self, force: bool) -> Result<(), Error> {
-        // do nothing by default
-        Ok(())
-    }
+    /// Get a package in this database, if present.
+    fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>) -> Result<Self::Pkg, Error>;
 
-    /// Get a package in this database
-    fn package(&self, name: &str) -> Self::Pkg;
+    /// Get the latest version of a package in this database, if a version is present.
+    fn package_latest<Str>(&self, name: Str) -> Result<Self::Pkg, Error>
+    where
+        Str: AsRef<str>;
 
-    /// Get all packages in this database
-    fn packages(&self) -> Self::PkgIter {
-        unimplemented!()
-    }
-}
-*/
-
-pub trait Package {
-    fn name(&self) -> &str;
+    /// Run a callback on all packages in the database.
+    fn packages<E, F>(&self, f: F) -> Result<(), E>
+    where
+        F: FnMut(Self::Pkg) -> Result<(), E>,
+        E: From<Error>;
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum DbStatus {
-    /// The database directory is not present.
+    /// The database is not present.
     Missing,
-    /// The database directory is present.
-    Exists {
-        /// Whether the database is consistent.
-        valid: bool,
-    },
+    /// The database is present but invalid.
+    Invalid,
+    /// The database is present and valid.
+    Valid,
 }
 /*
 bitflags! {

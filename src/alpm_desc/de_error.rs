@@ -1,10 +1,9 @@
 //! Errors for serializing the alpm db format
 use std::fmt::{self, Display};
-use std::io;
 use std::result::Result as StdResult;
 
-use failure::{Compat, Context, Fail};
-use serde::{de, ser};
+use failure::{Context, Fail};
+use serde::de;
 
 /// The error type for deserialization
 #[derive(Debug)]

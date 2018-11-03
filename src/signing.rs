@@ -2,12 +2,11 @@
 use failure::{err_msg, Fail, ResultExt};
 use gpgme::{self, KeyAlgorithm, Protocol};
 use std::ffi::OsString;
-use std::fs::{self, File};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use error::{Error, ErrorKind};
-use Alpm;
 
 enum SignatureStatus {
     Valid,

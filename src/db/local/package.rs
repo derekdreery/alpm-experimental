@@ -3,42 +3,41 @@ use std::collections::HashSet;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::rc::Weak;
-use std::time::SystemTime;
 
 use failure::ResultExt;
 use libflate::gzip::Decoder;
 use mtree::{self, Entry, MTree};
 
 use alpm_desc::de;
+use crate::package::{Package, PackageDescription, Reason, Validation};
 use error::{Error, ErrorKind};
 use Handle;
 
 #[derive(Debug, Clone, Derivative)]
 #[derivative(PartialEq, Hash)]
-pub struct Package {
+pub struct LocalPackage {
     pub path: PathBuf,
-    desc: PackageDesc,
+    desc: PackageDescription,
     files: Vec<Entry>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     handle: Weak<RefCell<Handle>>,
 }
 
-impl Package {
+impl LocalPackage {
     pub(crate) fn from_local(
         path: PathBuf,
         name: impl AsRef<str>,
         version: impl AsRef<str>,
         handle: Weak<RefCell<Handle>>,
-    ) -> Result<Package, Error> {
+    ) -> Result<Self, Error> {
         let name = name.as_ref();
         let version = version.as_ref();
 
         // get package description
         let desc_raw = fs::read_to_string(path.join("desc"))?;
-        let desc: PackageDesc =
+        let desc: PackageDescription =
             de::from_str(&desc_raw).context(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
 
         // check package name/version with path
@@ -72,10 +71,11 @@ impl Package {
             .context(ErrorKind::InvalidLocalPackage(name.to_owned()))?
             .into_iter()
             .map(|file| {
-                use std::os::unix::ffi::OsStringExt;
                 use std::ffi::OsString;
+                use std::os::unix::ffi::OsStringExt;
                 OsString::from(file).into_vec()
-            }).collect();
+            })
+            .collect();
 
         let prefix = Path::new("./");
         // get mtree
@@ -87,108 +87,112 @@ impl Package {
             // leading `./`. Also means this is O(n) rather than O(log n) which we could do
             // using equality (with files as a HashSet)
             Ok(e) => {
-                use std::os::unix::ffi::OsStrExt;
                 use std::ffi::OsStr;
+                use std::os::unix::ffi::OsStrExt;
                 let mtree_file = <Path as AsRef<OsStr>>::as_ref(e.path()).as_bytes();
                 files.contains(&mtree_file[2..])
-            },
+            }
             Err(_) => true,
         })
         .collect::<Result<_, _>>()?;
 
-        Ok(Package {
+        Ok(LocalPackage {
             path,
             desc,
             files: mtree,
             handle,
         })
     }
+}
 
+impl Package for LocalPackage {
     /// The package name.
-    pub fn name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.desc.name
     }
 
     /// The package version.
-    pub fn version(&self) -> &str {
+    fn version(&self) -> &str {
         &self.desc.version
     }
 
     /// The base of this package.
-    pub fn base(&self) -> Option<&str> {
+    fn base(&self) -> Option<&str> {
         self.desc.base.as_ref().map(|v| v.as_ref())
     }
 
     /// The package description.
-    pub fn description(&self) -> &str {
+    fn description(&self) -> &str {
         &self.desc.description
     }
 
     /// The groups this package is in.
-    pub fn groups(&self) -> impl Iterator<Item = &str> {
-        self.desc.groups.iter().map(|v| v.as_ref())
+    fn groups(&self) -> &[String] {
+        &self.desc.groups
     }
 
     /// The url for this package.
-    pub fn url(&self) -> &str {
+    fn url(&self) -> &str {
         &self.desc.url
     }
 
     /// The license for this package, if any.
-    pub fn license(&self) -> Option<&str> {
+    fn license(&self) -> Option<&str> {
         self.desc.license.as_ref().map(|v| v.as_ref())
     }
 
     /// The computer architecture this package is compiled for.
-    pub fn arch(&self) -> &str {
+    fn arch(&self) -> &str {
         &self.desc.arch
     }
 
     /// The person who created this package
-    pub fn packager(&self) -> &str {
+    fn packager(&self) -> &str {
         &self.desc.packager
     }
 
     /// The reason this package was installed, if given.
-    pub fn reason(&self) -> Option<Reason> {
+    fn reason(&self) -> Option<Reason> {
         self.desc.reason
     }
 
     /// The available types of validation for this package.
-    pub fn validation(&self) -> &[Validation] {
+    fn validation(&self) -> &[Validation] {
         &self.desc.validation
     }
 
     /// The size in bytes of this package.
-    pub fn size(&self) -> u64 {
+    fn size(&self) -> u64 {
         self.desc.size
     }
 
     /// Which packages this package replaces.
-    pub fn replaces(&self) -> impl Iterator<Item = &str> {
-        self.desc.replaces.iter().map(|v| v.as_ref())
+    fn replaces(&self) -> &[String] {
+        &self.desc.replaces
     }
 
     /// Which packages this package depends on.
-    pub fn depends(&self) -> impl Iterator<Item = &str> {
-        self.desc.depends.iter().map(|v| v.as_ref())
+    fn depends(&self) -> &[String] {
+        &self.desc.depends
     }
 
     /// Which packages this package optionally depends on.
-    pub fn optional_depends(&self) -> impl Iterator<Item = &str> {
-        self.desc.optional_depends.iter().map(|v| v.as_ref())
+    fn optional_depends(&self) -> &[String] {
+        &self.desc.optional_depends
     }
 
     /// Which packages this package conflicts with.
-    pub fn conflicts(&self) -> impl Iterator<Item = &str> {
-        self.desc.conflicts.iter().map(|v| v.as_ref())
+    fn conflicts(&self) -> &[String] {
+        &self.desc.conflicts
     }
 
     /// Which virtual packages this package provides.
-    pub fn provides(&self) -> impl Iterator<Item = &str> {
-        self.desc.provides.iter().map(|v| v.as_ref())
+    fn provides(&self) -> &[String] {
+        &self.desc.provides
     }
+}
 
+impl LocalPackage {
     /// An iterator over the paths of all files in this package.
     pub fn file_names(&self) -> impl Iterator<Item = &Path> {
         self.files().map(|v| v.path())
@@ -288,65 +292,13 @@ impl Package {
     }
 }
 
-/// Struct to help deserializing `desc` file
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
-struct PackageDesc {
-    name: String,
-    version: String,
-    base: Option<String>,
-    #[serde(rename = "desc")]
-    description: String,
-    #[serde(default)]
-    groups: Vec<String>,
-    url: String,
-    license: Option<String>,
-    arch: String,
-    //build_date: SystemTime,
-    //install_date: SystemTime,
-    packager: String,
-    reason: Option<Reason>,
-    validation: Vec<Validation>,
-    size: u64,
-    #[serde(default)]
-    replaces: Vec<String>,
-    #[serde(default)]
-    depends: Vec<String>,
-    #[serde(rename = "optdepends")]
-    #[serde(default)]
-    optional_depends: Vec<String>,
-    #[serde(default)]
-    conflicts: Vec<String>,
-    #[serde(default)]
-    provides: Vec<String>,
-}
-
-/// Struct to help deserializing `files` file
+/// Struct to help deserializing `files` file.
+///
+/// This is only present for local packages, as far as I can tell.
 #[derive(Debug, Deserialize, Serialize)]
 struct Files {
     #[serde(default)]
     files: Vec<PathBuf>,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
-pub enum Validation {
-    #[serde(rename = "none")]
-    None,
-    #[serde(rename = "md5")]
-    Md5,
-    #[serde(rename = "sha256")]
-    Sha256,
-    #[serde(rename = "pgp")]
-    Pgp,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
-pub enum Reason {
-    /// This package was explicitally installed
-    #[serde(rename = "0")]
-    Explicit,
-    /// This package was installed because it was required for another package
-    #[serde(rename = "1")]
-    Depend,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]

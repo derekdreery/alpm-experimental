@@ -21,8 +21,6 @@ extern crate failure_derive;
 extern crate fs2;
 extern crate gpgme;
 extern crate itertools;
-#[macro_use]
-extern crate lazy_static;
 extern crate lockfile;
 #[macro_use]
 extern crate log;
@@ -44,9 +42,10 @@ mod util;
 
 pub mod alpm_desc;
 pub mod db;
-pub mod package;
+mod package;
 
 pub use error::{Error, ErrorKind};
+pub use package::Package;
 
 pub use db::{LocalDatabase, SyncDatabase};
 use db::{
@@ -61,7 +60,6 @@ use uname::uname;
 use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::mem;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;

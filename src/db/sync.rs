@@ -1,12 +1,14 @@
-use std::borrow::Cow;
-use std::cell::{Ref, RefCell, RefMut};
+//! Remote databases (a.k.a. "sync databases")
+//!
+//! Sync databases are the same as the local database, except that they don't have the `file` and
+//! `mtree` files, and they are `tar`d and `gzipped` up.
+
+use std::cell::RefCell;
 use std::cmp;
-use std::collections::{hash_set, HashMap, HashSet};
-use std::convert::TryInto;
-use std::fmt::{self, Display};
+use std::collections::HashSet;
+use std::fmt;
 use std::fs;
-use std::io::{self, Read, Write};
-use std::ops::Deref;
+use std::io::{self, Write};
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
 
@@ -15,10 +17,9 @@ use error::{Error, ErrorKind};
 use util::UrlOrStr;
 use Handle;
 
-use atoi::atoi;
-use failure::{err_msg, Fail, ResultExt};
+use failure::{Fail, ResultExt};
 use fs2::FileExt;
-use reqwest::{self, Url};
+use reqwest::Url;
 
 const HTTP_DATE_FORMAT: &str = "%a, %d %b %Y %T GMT";
 
@@ -261,13 +262,15 @@ impl SyncDatabaseInner {
             Ok(md) => md,
         };
 
-        Ok(DbStatus::Exists {
-            valid: self.is_valid(metadata),
+        Ok(if self.is_valid(metadata) {
+            DbStatus::Valid
+        } else {
+            DbStatus::Invalid
         })
     }
 
     /// Synchronize the database with any external sources.
-    fn synchronize(&mut self, force: bool) -> Result<(), Error> {
+    fn synchronize(&mut self, mut force: bool) -> Result<(), Error> {
         use chrono::{DateTime, Utc};
         use reqwest::header::IF_MODIFIED_SINCE;
         use reqwest::StatusCode;
@@ -279,10 +282,9 @@ impl SyncDatabaseInner {
         let handle_ref = handle.borrow();
 
         // Force a reload when the db is invalid.
-        let mut force = force;
         match self.status()? {
-            DbStatus::Exists { valid: true } => (),
-            _ => {
+            DbStatus::Valid => (),
+            DbStatus::Invalid | DbStatus::Missing => {
                 force = true;
             }
         };

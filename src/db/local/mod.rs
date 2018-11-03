@@ -1,29 +1,29 @@
 use std::borrow::Cow;
-use std::cell::{Ref, RefCell, RefMut};
-use std::collections::hash_map::{self, HashMap};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
-use std::iter::repeat;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 use atoi::atoi;
-use failure::{self, err_msg, Fail, ResultExt};
+use failure::{Fail, ResultExt};
 
-use alpm_desc::de;
-use db::{DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME};
+use db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME};
 use error::{Error, ErrorKind};
 use Handle;
 
 mod package;
-pub use self::package::Package as LocalDbPackage;
+pub use self::package::LocalPackage;
 
 const LOCAL_DB_VERSION_FILE: &str = "ALPM_DB_VERSION";
 const LOCAL_DB_CURRENT_VERSION: u64 = 9;
 
 /// A package database.
-#[derive(Debug)]
+///
+/// Clones will be shallow - they will still point to the same internal database.
+#[derive(Debug, Clone)]
 pub struct LocalDatabase {
     inner: Rc<RefCell<LocalDatabaseInner>>,
 }
@@ -35,39 +35,37 @@ impl LocalDatabase {
     pub(crate) fn new(inner: Rc<RefCell<LocalDatabaseInner>>) -> LocalDatabase {
         LocalDatabase { inner }
     }
-}
-
-impl LocalDatabase {
-    //type Pkg = Rc<LocalDbPackage>;
-    //type PkgIter = RefMut<Values<String, Self::Pkg>>;
-    //type Path = Ref<'static, PathBuf>;
-
-    /// Get the name of this database
-    pub fn name(&self) -> &str {
-        LOCAL_DB_NAME
-    }
-
-    /// Get the path of the root file or directory for this database.
-    pub fn path<'a>(&'a self) -> Ref<'a, Path> {
-        Ref::map(self.inner.borrow(), |db| db.path.as_ref())
-    }
-
-    /// Get the status of this database.
-    pub fn status(&self) -> Result<DbStatus, Error> {
-        self.inner.borrow().status()
-    }
 
     /// Get the number of packages.
     pub fn count(&self) -> usize {
         self.inner.borrow().package_cache.len()
     }
+}
+
+impl Database for LocalDatabase {
+    type Pkg = Rc<LocalPackage>;
+
+    /// Get the name of this database
+    fn name(&self) -> &str {
+        LOCAL_DB_NAME
+    }
+
+    /// Get the path of the root file or directory for this database.
+    fn path(&self) -> PathBuf {
+        self.inner.borrow().path.clone()
+    }
+
+    /// Get the status of this database.
+    fn status(&self) -> Result<DbStatus, Error> {
+        self.inner.borrow().status()
+    }
 
     /// Get a package in this database, if present.
-    pub fn package(
+    fn package(
         &self,
         name: impl AsRef<str>,
         version: impl AsRef<str>,
-    ) -> Result<Rc<LocalDbPackage>, Error> {
+    ) -> Result<Rc<LocalPackage>, Error> {
         self.inner.borrow().package(name, version)
     }
 
@@ -79,16 +77,19 @@ impl LocalDatabase {
     ///
     /// Because the closure receives reference counted packages, they are cheap to clone, and can
     /// be collected into a Vec if that is desired.
-    pub fn packages<E, F>(&self, f: F) -> Result<(), E>
+    fn packages<E, F>(&self, f: F) -> Result<(), E>
     where
-        F: FnMut(Rc<LocalDbPackage>) -> Result<(), E>,
+        F: FnMut(Rc<LocalPackage>) -> Result<(), E>,
         E: From<Error>,
     {
         self.inner.borrow().packages(f)
     }
 
     /// Get the latest version of a package in this database, if a version is present.
-    pub fn package_latest(&self, name: impl AsRef<str>) -> Result<Rc<LocalDbPackage>, Error> {
+    fn package_latest<Str>(&self, name: Str) -> Result<Rc<LocalPackage>, Error>
+    where
+        Str: AsRef<str>,
+    {
         self.inner.borrow().package_latest(name)
     }
 }
@@ -147,7 +148,7 @@ impl LocalDatabaseInner {
         &self,
         name: impl AsRef<str>,
         version: impl AsRef<str>,
-    ) -> Result<Rc<LocalDbPackage>, Error> {
+    ) -> Result<Rc<LocalPackage>, Error> {
         let name = name.as_ref();
         let version = version.as_ref();
 
@@ -163,7 +164,7 @@ impl LocalDatabaseInner {
     /// There should only be one version of a package installed at any time,
     /// so this function is kinda useless, and it's also expensive as it has to traverse the
     /// hashtable.
-    fn package_latest(&self, name: impl AsRef<str>) -> Result<Rc<LocalDbPackage>, Error> {
+    fn package_latest(&self, name: impl AsRef<str>) -> Result<Rc<LocalPackage>, Error> {
         let name = name.as_ref();
 
         self.package_cache
@@ -178,7 +179,7 @@ impl LocalDatabaseInner {
 
     fn packages<'a, E, F>(&'a self, mut f: F) -> Result<(), E>
     where
-        F: FnMut(Rc<LocalDbPackage>) -> Result<(), E>,
+        F: FnMut(Rc<LocalPackage>) -> Result<(), E>,
         E: From<Error>,
     {
         for pkg in self
@@ -204,7 +205,7 @@ impl LocalDatabaseInner {
         };
 
         if !md.is_dir() {
-            return Ok(DbStatus::Exists { valid: false });
+            return Ok(DbStatus::Invalid);
         }
 
         debug!("checking local database version");
@@ -266,7 +267,11 @@ impl LocalDatabaseInner {
                 false
             }
         };
-        Ok(DbStatus::Exists { valid })
+        Ok(if valid {
+            DbStatus::Valid
+        } else {
+            DbStatus::Invalid
+        })
     }
 
     /// Load all package names into the cache, and validate the database
@@ -325,7 +330,7 @@ enum MaybePackage {
         version: String,
     },
     /// Loaded the package
-    Loaded(Rc<LocalDbPackage>),
+    Loaded(Rc<LocalPackage>),
 }
 
 impl MaybePackage {
@@ -343,7 +348,7 @@ impl MaybePackage {
     }
 
     /// Load the package if necessary and return it
-    fn load(&mut self, handle: Weak<RefCell<Handle>>) -> Result<Rc<LocalDbPackage>, Error> {
+    fn load(&mut self, handle: Weak<RefCell<Handle>>) -> Result<Rc<LocalPackage>, Error> {
         match self {
             MaybePackage::Unloaded {
                 path,
@@ -351,7 +356,7 @@ impl MaybePackage {
                 version,
             } => {
                 // todo find a way to avoid cloning `path`
-                let pkg = Rc::new(LocalDbPackage::from_local(
+                let pkg = Rc::new(LocalPackage::from_local(
                     path.clone(),
                     name,
                     version,

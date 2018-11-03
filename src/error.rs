@@ -2,7 +2,7 @@ use failure::{Backtrace, Context, Fail};
 use mtree;
 use std::fmt;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The main error type for this library.
 #[derive(Debug)]
