@@ -64,7 +64,7 @@ fn run(opts: Opts) -> Result<(), Error> {
     */
 
     match opts.subcommand {
-        Cmd::DiskUsageReport { human } => {
+        Cmd::DiskUsageReport { human: _ } => {
             let local_db = alpm.local_database();
             let mut reported_size = 0;
             let mut size_on_disk = 0;
@@ -199,7 +199,7 @@ impl Cmd {
             ("disk", Some(sub_m)) => Cmd::DiskUsageReport {
                 human: sub_m.is_present("human"),
             },
-            ("validate", Some(sub_m)) => Cmd::Validate,
+            ("validate", Some(_sub_m)) => Cmd::Validate,
             _ => unreachable!(),
         }
     }

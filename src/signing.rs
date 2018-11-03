@@ -57,8 +57,8 @@ fn alpm_sigpath(path: &Path) -> Option<PathBuf> {
 
 pub fn init(gpg_directory: impl AsRef<Path>) -> Result<(), Error> {
     let gpg_directory = gpg_directory.as_ref();
-    let pub_ring = gpg_directory.join("pubring.gpg");
-    let trustdb = gpg_directory.join("trustdb.gpg");
+    let _pub_ring = gpg_directory.join("pubring.gpg");
+    let _trustdb = gpg_directory.join("trustdb.gpg");
     let gpg_directory_str = gpg_directory
         .to_str()
         .ok_or(Error::from(ErrorKind::Gpgme))?;

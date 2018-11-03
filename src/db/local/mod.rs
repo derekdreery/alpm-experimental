@@ -169,8 +169,8 @@ impl LocalDatabaseInner {
 
         self.package_cache
             .iter()
-            .filter(|(key, value)| key.name == name)
-            .max_by_key(|(key, value)| &key.version)
+            .filter(|(key, _value)| key.name == name)
+            .max_by_key(|(key, _value)| &key.version)
             .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?
             .1
             .borrow_mut()

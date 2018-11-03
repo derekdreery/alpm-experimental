@@ -77,7 +77,7 @@ impl LocalPackage {
             })
             .collect();
 
-        let prefix = Path::new("./");
+        let _prefix = Path::new("./");
         // get mtree
         let mtree = MTree::from_reader(Decoder::new(io::BufReader::new(fs::File::open(
             path.join("mtree"),

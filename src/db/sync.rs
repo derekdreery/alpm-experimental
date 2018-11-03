@@ -116,12 +116,12 @@ impl Database for SyncDatabase {
     */
 
     /// Get a package in this database, if present.
-    fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>) -> Result<Self::Pkg, Error> {
+    fn package(&self, _name: impl AsRef<str>, _version: impl AsRef<str>) -> Result<Self::Pkg, Error> {
         unimplemented!()
     }
 
     /// Get the latest version of a package in this database, if a version is present.
-    fn package_latest<Str>(&self, name: Str) -> Result<Self::Pkg, Error>
+    fn package_latest<Str>(&self, _name: Str) -> Result<Self::Pkg, Error>
     where
         Str: AsRef<str>,
     {
@@ -129,7 +129,7 @@ impl Database for SyncDatabase {
     }
 
     /// Run a callback on all packages in the database.
-    fn packages<E, F>(&self, f: F) -> Result<(), E>
+    fn packages<E, F>(&self, _f: F) -> Result<(), E>
     where
         F: FnMut(Self::Pkg) -> Result<(), E>,
         E: From<Error>,

@@ -363,7 +363,7 @@ impl AlpmBuilder {
             }
         })?;
 
-        let arch = root_path.clone();
+        let _arch = root_path.clone();
         debug!("gpg path: {}", gpg_path.display());
 
         // Get architecture of computer
