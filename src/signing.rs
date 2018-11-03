@@ -6,7 +6,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use error::{Error, ErrorKind};
+use crate::error::{Error, ErrorKind};
 
 enum SignatureStatus {
     Valid,

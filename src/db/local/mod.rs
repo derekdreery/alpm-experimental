@@ -10,9 +10,9 @@ use std::rc::{Rc, Weak};
 use atoi::atoi;
 use failure::{Fail, ResultExt};
 
-use db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME};
-use error::{Error, ErrorKind};
-use Handle;
+use crate::db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME};
+use crate::error::{Error, ErrorKind};
+use crate::Handle;
 
 mod package;
 pub use self::package::LocalPackage;

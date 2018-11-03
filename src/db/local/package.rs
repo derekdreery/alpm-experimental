@@ -10,10 +10,10 @@ use failure::ResultExt;
 use libflate::gzip::Decoder;
 use mtree::{self, Entry, MTree};
 
-use alpm_desc::de;
+use crate::alpm_desc::de;
 use crate::package::{Package, PackageDescription, Reason, Validation};
-use error::{Error, ErrorKind};
-use Handle;
+use crate::error::{Error, ErrorKind};
+use crate::Handle;
 
 #[derive(Debug, Clone, Derivative)]
 #[derivative(PartialEq, Hash)]

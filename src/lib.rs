@@ -44,11 +44,11 @@ pub mod alpm_desc;
 pub mod db;
 mod package;
 
-pub use error::{Error, ErrorKind};
-pub use package::Package;
+pub use crate::error::{Error, ErrorKind};
+pub use crate::package::Package;
 
-pub use db::{LocalDatabase, SyncDatabase};
-use db::{
+pub use crate::db::{LocalDatabase, SyncDatabase};
+use crate::db::{
     LocalDatabaseInner, SignatureLevel, SyncDatabaseInner, SyncDbName, DEFAULT_SYNC_DB_EXT,
     SYNC_DB_DIR,
 };

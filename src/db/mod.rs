@@ -1,6 +1,6 @@
 //! Functionality relating to alpm databases (local and sync).
 
-use error::Error;
+use crate::error::Error;
 use std::path::PathBuf;
 
 mod local;
@@ -108,6 +108,7 @@ impl Default for SignatureLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test(ignore)]
     fn db_path() {

@@ -12,10 +12,10 @@ use std::io::{self, Write};
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
 
-use db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME, SYNC_DB_DIR};
-use error::{Error, ErrorKind};
-use util::UrlOrStr;
-use Handle;
+use crate::db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME, SYNC_DB_DIR};
+use crate::error::{Error, ErrorKind};
+use crate::util::UrlOrStr;
+use crate::Handle;
 
 use failure::{Fail, ResultExt};
 use fs2::FileExt;
