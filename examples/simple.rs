@@ -15,8 +15,8 @@ extern crate log;
 extern crate progress;
 extern crate users;
 
-use alpm::{Alpm, Error, Package};
 use alpm::db::Database;
+use alpm::{Alpm, Error, Package};
 use clap::{App, AppSettings, Arg, ArgMatches};
 use failure::Fail;
 use humansize::{file_size_opts::BINARY, FileSize};
@@ -119,12 +119,12 @@ fn run(opts: Opts) -> Result<(), Error> {
     core.add_server(server_url("core", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     core.synchronize(false)?;
-
+    
     let mut extra = alpm.sync_database("extra")?;
     extra.add_server(server_url("extra", "x86_64"))?;
     println!(r#"core db ("{}") status: {:?}"#, core.path().display(), core.status()?);
     extra.synchronize(false)?;
-
+    
     extra.add_server(&server_url("extra", "x86_64"))?;
     community.add_server(&server_url("community", "x86_64"))?;
     multilib.add_server(&server_url("multilib", "x86_64"))?;

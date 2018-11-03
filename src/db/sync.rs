@@ -12,7 +12,7 @@ use std::io::{self, Write};
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
 
-use db::{DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME, SYNC_DB_DIR};
+use db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME, SYNC_DB_DIR};
 use error::{Error, ErrorKind};
 use util::UrlOrStr;
 use Handle;
@@ -23,7 +23,7 @@ use reqwest::Url;
 
 const HTTP_DATE_FORMAT: &str = "%a, %d %b %Y %T GMT";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SyncDatabase {
     // Cache name and path
     name: String,
@@ -77,12 +77,20 @@ impl SyncDatabase {
         Ok(())
     }
 
+    /// Helper function to make use-after-drop on the handle an error, not a panic.
     fn upgrade(&self) -> Result<Rc<RefCell<SyncDatabaseInner>>, Error> {
         WeakRc::upgrade(&self.inner).ok_or(ErrorKind::UseAfterDrop.into())
     }
+
+    /// Synchronize the database with any external sources.
+    pub fn synchronize(&self, force: bool) -> Result<(), Error> {
+        self.upgrade()?.borrow_mut().synchronize(force)
+    }
 }
 
-impl SyncDatabase {
+impl Database for SyncDatabase {
+    type Pkg = ();
+
     /// Get the name of the database
     #[inline]
     fn name(&self) -> &str {
@@ -91,18 +99,13 @@ impl SyncDatabase {
 
     /// Get the path of this database.
     #[inline]
-    fn path(&self) -> &Path {
-        &self.path
+    fn path(&self) -> PathBuf {
+        self.path.clone()
     }
 
     /// Get the status of this database.
     fn status(&self) -> Result<DbStatus, Error> {
         self.upgrade()?.borrow().status()
-    }
-
-    /// Synchronize the database with any external sources.
-    fn synchronize(&self, force: bool) -> Result<(), Error> {
-        self.upgrade()?.borrow_mut().synchronize(force)
     }
 
     /*
@@ -111,6 +114,28 @@ impl SyncDatabase {
         unimplemented!();
     }
     */
+
+    /// Get a package in this database, if present.
+    fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>) -> Result<Self::Pkg, Error> {
+        unimplemented!()
+    }
+
+    /// Get the latest version of a package in this database, if a version is present.
+    fn package_latest<Str>(&self, name: Str) -> Result<Self::Pkg, Error>
+    where
+        Str: AsRef<str>,
+    {
+        unimplemented!()
+    }
+
+    /// Run a callback on all packages in the database.
+    fn packages<E, F>(&self, f: F) -> Result<(), E>
+    where
+        F: FnMut(Self::Pkg) -> Result<(), E>,
+        E: From<Error>,
+    {
+        unimplemented!()
+    }
 }
 
 /// A package database.
@@ -344,13 +369,6 @@ impl SyncDatabaseInner {
         }
         Ok(())
     }
-
-    /*
-    /// Get the packages in this database
-    fn packages(&self) -> &HashMap<String, Package> {
-        unimplemented!();
-    }
-    */
 
     /// Fetches an alpm handle and maps failure to an error
     fn get_handle(&self) -> Result<Rc<RefCell<Handle>>, Error> {
