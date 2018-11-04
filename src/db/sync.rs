@@ -3,52 +3,53 @@
 //! Sync databases are the same as the local database, except that they don't have the `file` and
 //! `mtree` files, and they are `tar`d and `gzipped` up.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{self, Path, PathBuf};
 use std::rc::{Rc, Weak as WeakRc};
-use std::borrow::Cow;
 
-use crate::db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME, SYNC_DB_DIR};
+use crate::db::{
+    Database, DbStatus, DbUsage, SignatureLevel, DEFAULT_SYNC_DB_EXT, LOCAL_DB_NAME, SYNC_DB_DIR,
+};
 use crate::error::{Error, ErrorKind};
 use crate::util::UrlOrStr;
 use crate::Handle;
 
 use failure::{Fail, ResultExt};
 use fs2::FileExt;
+use libflate::gzip;
 use reqwest::Url;
 
-//mod package;
+pub use self::package::SyncPackage;
+
+mod package;
 
 const HTTP_DATE_FORMAT: &str = "%a, %d %b %Y %T GMT";
 
+/// A sync database of available packages.
 #[derive(Debug, Clone)]
 pub struct SyncDatabase {
     // Cache name and path
     name: String,
-    path: PathBuf,
-    inner: WeakRc<RefCell<SyncDatabaseInner>>,
+    inner: Rc<RefCell<SyncDatabaseInner>>,
 }
 
 impl SyncDatabase {
     #[inline]
-    pub(crate) fn new(db: &Rc<RefCell<SyncDatabaseInner>>, name: String, path: PathBuf) -> Self {
-        SyncDatabase {
-            inner: Rc::downgrade(db),
-            name,
-            path,
-        }
+    pub(crate) fn new(inner: Rc<RefCell<SyncDatabaseInner>>, name: String) -> Self {
+        SyncDatabase { inner, name }
     }
 
     /// Get a copy of the registered servers for this database.
     #[inline]
     pub fn servers<'a>(&'a self) -> Result<Vec<Url>, Error> {
         Ok(self
-            .upgrade()?
+            .inner
             .borrow_mut()
             .servers
             .iter()
@@ -62,7 +63,7 @@ impl SyncDatabase {
     where
         UrlOrStr: From<U>,
     {
-        self.upgrade()?.borrow_mut().add_server(url)
+        self.inner.borrow_mut().add_server(url)
     }
 
     /// Remove the server with the given url, if present
@@ -70,40 +71,33 @@ impl SyncDatabase {
     where
         UrlOrStr: From<U>,
     {
-        self.upgrade()?.borrow_mut().remove_server(url)
+        self.inner.borrow_mut().remove_server(url)
     }
 
     /// Remove all servers from this database.
-    pub fn clear_servers(&self) -> Result<(), Error> {
-        let db = self.upgrade()?;
-        db.borrow_mut().clear_servers();
-        Ok(())
-    }
-
-    /// Helper function to make use-after-drop on the handle an error, not a panic.
-    fn upgrade(&self) -> Result<Rc<RefCell<SyncDatabaseInner>>, Error> {
-        WeakRc::upgrade(&self.inner).ok_or(ErrorKind::UseAfterDrop.into())
+    pub fn clear_servers(&self) {
+        self.inner.borrow_mut().clear_servers();
     }
 
     /// Synchronize the database with any external sources.
     pub fn synchronize(&self, force: bool) -> Result<(), Error> {
-        self.upgrade()?.borrow_mut().synchronize(force)
+        self.inner.borrow_mut().synchronize(force)
     }
 }
 
 impl Database for SyncDatabase {
-    type Pkg = ();
+    type Pkg = Rc<SyncPackage>;
 
     fn name(&self) -> &str {
         &self.name
     }
 
     fn path(&self) -> PathBuf {
-        self.path.clone()
+        self.inner.borrow().path.clone()
     }
 
     fn status(&self) -> Result<DbStatus, Error> {
-        self.upgrade()?.borrow().status()
+        self.inner.borrow().status()
     }
 
     fn count(&self) -> usize {
@@ -112,25 +106,42 @@ impl Database for SyncDatabase {
 
     fn package(
         &self,
-        _name: impl AsRef<str>,
-        _version: impl AsRef<str>,
+        name: impl AsRef<str>,
+        version: impl AsRef<str>,
     ) -> Result<Self::Pkg, Error> {
-        unimplemented!()
+        use crate::package::Package;
+
+        let name = name.as_ref();
+        let version = version.as_ref();
+        let db = self.inner.borrow();
+        let package = db.package_cache.get(&Cow::Borrowed(name))
+            .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
+        if version != package.version() {
+            return Err(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
+        }
+        Ok(package.clone())
     }
 
-    fn package_latest<Str>(&self, _name: Str) -> Result<Self::Pkg, Error>
+    fn package_latest<Str>(&self, name: Str) -> Result<Self::Pkg, Error>
     where
         Str: AsRef<str>,
     {
-        unimplemented!()
+        let name = name.as_ref();
+        let package = self.inner.borrow().package_cache.get(&Cow::Borrowed(name))
+            .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?.clone();
+        Ok(package)
     }
 
-    fn packages<E, F>(&self, _f: F) -> Result<(), E>
+    fn packages<E, F>(&self, mut f: F) -> Result<(), E>
     where
         F: FnMut(Self::Pkg) -> Result<(), E>,
         E: From<Error>,
     {
-        unimplemented!()
+        let db = self.inner.borrow();
+        for package in db.package_cache.values() {
+            f(package.clone())?;
+        }
+        Ok(())
     }
 }
 
@@ -152,7 +163,7 @@ pub struct SyncDatabaseInner {
     /// The package cache (HashMap of package name to package)
     // Unlike in LocalDatabaseInner we don't have a version, since there is only one version of any
     // package in a sync repository.
-    package_cache: HashMap<Cow<'static, str>, /*Package*/()>,
+    package_cache: HashMap<Cow<'static, str>, Rc<SyncPackage>>,
     /// Count of the number of packages (cached)
     package_count: usize,
 }
@@ -175,8 +186,7 @@ impl SyncDatabaseInner {
             !handle_ref.sync_database_registered(&name),
             "internal error - database already exists"
         );
-        let db_filename = name.filename(&handle_ref.database_extension);
-        let path = handle_ref.database_path.join(db_filename);
+        let path = name.path(&handle_ref.database_path);
         drop(handle_ref);
         let mut db = SyncDatabaseInner {
             handle: Rc::downgrade(&handle),
@@ -186,15 +196,10 @@ impl SyncDatabaseInner {
             servers: HashSet::new(),
             path,
             package_cache: HashMap::new(),
-            package_count: 0
+            package_count: 0,
         };
+        db.populate_package_cache().unwrap();
         db
-    }
-
-    /// Get the registered servers for this database.
-    #[inline]
-    fn servers(&self) -> &HashSet<Url> {
-        &self.servers
     }
 
     /// Add server
@@ -220,12 +225,14 @@ impl SyncDatabaseInner {
         };
         log::debug!(
             r#"adding server with url "{}" from database "{}"."#,
-            url, self.name
+            url,
+            self.name
         );
         if !self.servers.insert(url.clone()) {
             log::warn!(
                 r#"server with url "{}" was already present in database "{}"."#,
-                url, self.name
+                url,
+                self.name
             );
         }
         Ok(())
@@ -244,13 +251,15 @@ impl SyncDatabaseInner {
         })?;
         log::debug!(
             r#"removing server with url "{}" from database "{}"."#,
-            url, self.name
+            url,
+            self.name
         );
 
         if !self.servers.remove(&url) {
             log::warn!(
                 r#"server with url "{}" was not present in database "{}"."#,
-                url, self.name
+                url,
+                self.name
             );
         }
         Ok(())
@@ -344,7 +353,8 @@ impl SyncDatabaseInner {
                 code => {
                     log::warn!(
                         "Unexpected code {} while updating database {} - bailing",
-                        code, self.name
+                        code,
+                        self.name
                     );
                     return Ok(());
                 }
@@ -375,11 +385,65 @@ impl SyncDatabaseInner {
     fn get_handle(&self) -> Result<Rc<RefCell<Handle>>, Error> {
         self.handle.upgrade().ok_or(ErrorKind::UseAfterDrop.into())
     }
+
+    /// Load all packags into the cache, and validate the database
+    pub(crate) fn populate_package_cache(&mut self) -> Result<(), Error> {
+        use std::io::Read;
+
+        log::info!("Getting cache from {}", self.path.display());
+        // Times like this you wish you were in haskell
+        let mut reader = tar::Archive::new(gzip::Decoder::new(io::BufReader::new(
+            fs::File::open(&self.path)?,
+        ))?);
+
+        if !self.package_cache.is_empty() || self.package_count != 0 {
+            panic!("populate_package_cache should only be called once on database cration");
+        }
+
+        for entry in reader.entries()? {
+            let mut entry = entry?;
+
+            let path = entry.path()?;
+            let file_name = match path.file_name() {
+                Some(p) if p == "desc" => path
+                    .parent()
+                    .and_then(|parent| parent.file_name())
+                    .expect("TODO handle malformed db archive")
+                    .to_str()
+                    .expect("TODO handle non-utf8 package name")
+                    .to_owned(),
+                _ => continue,
+            };
+            let (name, version) = super::split_package_dirname(&file_name)
+                .ok_or(ErrorKind::InvalidSyncPackage(file_name.to_owned()))?;
+            log::debug!(r#"found "{}", version: "{}""#, name, version);
+
+            // Get contents of desc file
+            let mut contents = Vec::new();
+            entry.read_to_end(&mut contents)?;
+            let contents = String::from_utf8(contents)
+                .context(ErrorKind::InvalidSyncPackage(name.to_owned()))?;
+            let package = SyncPackage::from_parts(&contents, &name, &version)?;
+
+            if self
+                .package_cache
+                .insert(Cow::Owned(name.to_owned()), Rc::new(package))
+                .is_some()
+            {
+                panic!(
+                    "internal error - there should only ever be 1 package with a given name \
+                     in a sync database"
+                );
+            }
+            self.package_count += 1;
+        }
+        Ok(())
+    }
 }
 
 /// The name (and implied type) of an alpm database.
 ///
-/// Valid database names do not contain path separators (on any OS), or the dot char ('.').
+/// Valid database names do not contain path separators, or the dot char ('.').
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) struct SyncDbName(String);
 
@@ -418,12 +482,12 @@ impl SyncDbName {
     /// Get the path for this database name
     ///
     /// Must supply the root database path from the alpm instance.
-    pub(crate) fn path(&self, database_path: impl AsRef<Path>, ext: impl AsRef<str>) -> PathBuf {
+    pub(crate) fn path(&self, database_path: impl AsRef<Path>) -> PathBuf {
         let database_path = database_path.as_ref();
         //  database path `$db_path SEP "sync" SEP $name "." $ext`
         let mut path = database_path.join(SYNC_DB_DIR);
         path.push(&self.0);
-        path.set_extension(ext.as_ref());
+        path.set_extension(DEFAULT_SYNC_DB_EXT);
         path
     }
 

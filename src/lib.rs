@@ -3,36 +3,34 @@
 #[cfg(not(unix))]
 compile_error!("Only works on unix for now");
 
+
 mod error;
-mod signing;
+//mod signing;
 mod util;
 
 pub mod alpm_desc;
 pub mod db;
 mod package;
 
+use crate::db::{
+    LocalDatabase, LocalDatabaseInner, SignatureLevel, SyncDatabase, SyncDatabaseInner,
+    SyncDbName, DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR,
+};
 pub use crate::error::{Error, ErrorKind};
 pub use crate::package::Package;
-
-pub use crate::db::{LocalDatabase, SyncDatabase};
-use crate::db::{
-    LocalDatabaseInner, SignatureLevel, SyncDatabaseInner, SyncDbName, DEFAULT_SYNC_DB_EXT,
-    SYNC_DB_DIR,
-};
 
 use failure::{Fail, ResultExt};
 use lockfile::Lockfile;
 use uname::uname;
 
-use std::cell::{Ref, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 /// The name of the lockfile (hard-coded).
-pub const LOCKFILE: &str = "db.lck";
+const LOCKFILE: &str = "db.lck";
 
 /// The main alpm object that owns the system handle.
 pub struct Alpm {
@@ -45,13 +43,13 @@ impl Alpm {
     /// # Examples
     ///
     /// Create a new instance using the defaults
-    /// ```
+    /// ```no_run
     /// # use alpm::Alpm;
     /// let alpm = Alpm::new().build();
     /// ```
     ///
     /// Create a new instance for a chroot environment
-    /// ```
+    /// ```no_run
     /// # use alpm::Alpm;
     /// let alpm = Alpm::new()
     ///     .with_root_path("/my/chroot")
@@ -77,7 +75,12 @@ impl Alpm {
     pub fn sync_database(&self, name: impl AsRef<str>) -> Result<SyncDatabase, Error> {
         let name = name.as_ref();
         let db_name = SyncDbName::new(name)?;
-        let db = self.handle.borrow().sync_databases.get(&db_name).map(Clone::clone);
+        let db = self
+            .handle
+            .borrow()
+            .sync_databases
+            .get(&db_name)
+            .map(Clone::clone);
         // Second stage to release borrow
         let db = match db {
             Some(db) => db,
@@ -85,8 +88,15 @@ impl Alpm {
         };
 
         let name = db_name.into();
-        let path = db.borrow().path.clone();
-        Ok(SyncDatabase::new(&db, name, path))
+        Ok(SyncDatabase::new(db, name))
+    }
+
+    pub fn sync_databases<F>(&self, mut f: F)
+        where F: FnMut(SyncDatabase)
+    {
+        for (name, db) in self.handle.borrow().sync_databases.iter() {
+            f(SyncDatabase::new(db.clone(), name.to_string()));
+        }
     }
 
     /// Register a new sync database
@@ -96,13 +106,15 @@ impl Alpm {
         let handle = self.handle.clone();
         let new_db = SyncDatabaseInner::new(handle, name.clone(), SignatureLevel::default());
         let new_db = Rc::new(RefCell::new(new_db));
-        if self.handle
+        if self
+            .handle
             .borrow_mut()
             .sync_databases
             .insert(name.clone(), new_db.clone())
-            .is_some() {
-                panic!(r#"internal error: database "{}" already registered"#, name);
-            };
+            .is_some()
+        {
+            panic!(r#"internal error: database "{}" already registered"#, name);
+        };
         new_db
     }
 
@@ -360,7 +372,7 @@ impl AlpmBuilder {
         };
         log::debug!("arch: {}", &arch);
 
-        signing::init(&gpg_path)?;
+        //signing::init(&gpg_path)?;
 
         // Chicken-and-egg problem for local_database
         let handle = Rc::new(RefCell::new(Handle {
@@ -397,4 +409,3 @@ impl AlpmBuilder {
 fn is_valid_db_extension(ext: &str) -> bool {
     ext.chars().all(|ch| ch.is_alphanumeric())
 }
-

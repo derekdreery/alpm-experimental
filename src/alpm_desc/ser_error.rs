@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use std::io;
 use std::result::Result as StdResult;
 
-use failure::{Context, Fail, format_err};
+use failure::{format_err, Context, Fail};
 use serde::ser;
 
 /// The error type for serialization

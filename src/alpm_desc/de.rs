@@ -62,6 +62,8 @@ impl<'de> Deserializer<'de> {
         }
     }
 
+    // TODO implement `from_reader`
+
     /// Returns the next key, and consumes it.
     fn parse_key(&mut self) -> Result<&'de str> {
         match nom_parsers::parse_key(self.input, self.line_ending) {
@@ -750,7 +752,7 @@ impl<'a, 'de> SeqAccess<'de> for AlpmSeq<'a, 'de> {
 
 /// These have to be in a separate module to avoid a name clash for `ErrorKind`
 mod nom_parsers {
-    use nom::{do_parse, tag, take_till1, call, IResult};
+    use nom::{call, do_parse, tag, take_till1, IResult};
 
     /*
     /// We need our own is_digit, because nom's version works on u8, not char
@@ -760,17 +762,17 @@ mod nom_parsers {
             _ => false,
         }
     }
-
+    
     named!(pub parse_unsigned(&str) -> &str, recognize!(
         take_while1!(call!(is_digit))
     ));
-
+    
     named!(pub parse_signed(&str) -> &str, recognize!(do_parse!(
         opt!(alt!(tag!("+") | tag!("-"))) >>
         take_while1!(call!(is_digit)) >>
         (())
     )));
-
+    
     named!(pub parse_float(&str) -> &str, recognize!(
         do_parse!(
             opt!(alt!(tag!("+") | tag!("-"))) >>
@@ -820,17 +822,17 @@ mod nom_parsers {
             assert!(!is_digit(*negative));
         }
     }
-
+    
     #[test]
     fn test_parse_unsigned() {
         assert_eq!(parse_unsigned("60 sef"), Ok((" sef", "60")));
     }
-
+    
     #[test]
     fn test_parse_signed() {
         assert_eq!(parse_signed("60 sef"), Ok((" sef", "60")));
     }
-
+    
     #[test]
     fn test_parse_float() {
         assert_eq!(parse_float("60. sef"), Ok((" sef", "60.")));

@@ -49,6 +49,11 @@ pub enum Cmd {
     },
     /// Validate all packages
     Validate,
+    /// Search the sync databases for a package with a given name
+    Search {
+        /// The text to search for
+        name: String,
+    },
 }
 
 fn run(opts: Opts) -> Result<(), Error> {
@@ -62,7 +67,7 @@ fn run(opts: Opts) -> Result<(), Error> {
     let multilib = alpm.sync_database("multilib")?;
 
     match opts.subcommand {
-        Cmd::DiskUsageReport { human: _ } => {
+        Cmd::DiskUsageReport { human } => {
             let local_db = alpm.local_database();
             let mut reported_size = 0;
             let mut size_on_disk = 0;
@@ -86,11 +91,16 @@ fn run(opts: Opts) -> Result<(), Error> {
                 Ok(())
             })?;
 
-            println!(
-                "Reported size: {}",
-                reported_size.file_size(BINARY).unwrap()
-            );
-            println!("Actual size: {}", size_on_disk.file_size(BINARY).unwrap());
+            if human {
+                println!(
+                    "Reported size: {}",
+                    reported_size.file_size(BINARY).unwrap()
+                );
+                println!("Actual size: {}", size_on_disk.file_size(BINARY).unwrap());
+            } else {
+                println!("Reported size: {}", reported_size);
+                println!("Actual size: {}", size_on_disk);
+            }
         }
         Cmd::Validate => {
             let local_db = alpm.local_database();
@@ -109,6 +119,17 @@ fn run(opts: Opts) -> Result<(), Error> {
                     println!("  {}", err);
                 }
             }
+        }
+        Cmd::Search { name } => {
+            alpm.sync_databases(|db| {
+                println!("In database \"{}\"", db.name());
+                db.packages(|pkg| -> Result<(), alpm::Error> {
+                    if pkg.name().contains(&name) {
+                        println!("  {}: {}", pkg.name(), pkg.description());
+                    }
+                    Ok(())
+                }).unwrap();
+            });
         }
     }
 
@@ -198,6 +219,9 @@ impl Cmd {
                 human: sub_m.is_present("human"),
             },
             ("validate", Some(_sub_m)) => Cmd::Validate,
+            ("search", Some(sub_m)) => Cmd::Search {
+                name: sub_m.value_of("name").unwrap().to_owned(),
+            },
             _ => unreachable!(),
         }
     }
@@ -229,6 +253,15 @@ fn main() {
             ),
         )
         .subcommand(App::new("validate").about("Check all packages against the local database."))
+        .subcommand(
+            App::new("search")
+                .about("Search the sync databases for a package.")
+                .arg(
+                    Arg::with_name("name")
+                        .required(true)
+                        .help("the name of the package to search for"),
+                ),
+        )
         .get_matches();
     let opts = Opts::from_args(args);
 

@@ -78,6 +78,8 @@ pub enum ErrorKind {
     CannotAddServerToDatabase { url: String, database: String },
     #[fail(display = "A package (\"{}\") in the local database was invalid", _0)]
     InvalidLocalPackage(String),
+    #[fail(display = "A package (\"{}\") in a sync database was invalid", _0)]
+    InvalidSyncPackage(String),
     /// There was an error when getting/updating the database version.
     #[fail(
         display = "there was an unexpected error getting/updating the version for database \"{}\"",
