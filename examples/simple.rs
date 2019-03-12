@@ -9,7 +9,6 @@ extern crate alpm;
 #[macro_use]
 extern crate clap;
 extern crate env_logger;
-extern crate failure;
 extern crate humansize;
 extern crate log;
 extern crate progress;
@@ -18,7 +17,6 @@ extern crate users;
 use alpm::db::{Database, ValidationError};
 use alpm::{Alpm, Error, Package};
 use clap::{App, AppSettings, Arg, ArgMatches};
-use failure::Fail;
 use humansize::{file_size_opts::BINARY, FileSize};
 use log::LevelFilter;
 
@@ -290,21 +288,20 @@ fn main() {
         .filter_module("simple", opts.verbosity)
         .init();
 
-    if let Err(e) = run(opts) {
-        let mut causes = e.causes();
+    if let Err(root_err) = run(opts) {
         println!("-- Error --");
-        let first = causes.next().unwrap();
-        println!("{}", first);
-        let mut backtrace = first.backtrace();
-        for cause in causes {
-            println!("  caused by: {}", cause);
-            if let Some(bt) = cause.backtrace() {
-                backtrace = Some(bt);
+        println!("{}", root_err);
+        // This is horrible, and exists because I want to be Send + Sync, but StdError::source does
+        // not.
+        if let Some(err) = root_err.source() {
+            println!("  caused by: {}", err);
+            if let Some(mut err) = err.source() {
+                println!("  caused by: {}", err);
+                while let Some(source) = err.source() {
+                    println!("  caused by: {}", source);
+                    err = source;
+                }
             }
-        }
-        if let Some(bt) = backtrace {
-            println!("-- Backtrace --");
-            println!("{}", bt);
         }
     }
 }

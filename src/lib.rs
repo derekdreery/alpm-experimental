@@ -15,10 +15,9 @@ use crate::db::{
     LocalDatabase, LocalDatabaseInner, SignatureLevel, SyncDatabase, SyncDatabaseInner, SyncDbName,
     DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR,
 };
-pub use crate::error::{Error, ErrorKind};
+pub use crate::error::{Error, ErrorContext, ErrorKind};
 pub use crate::package::Package;
 
-use failure::{Fail, ResultExt};
 use lockfile::Lockfile;
 use uname::uname;
 
@@ -357,9 +356,9 @@ impl AlpmBuilder {
         let lockfile = Lockfile::create(&lockfile_path).map_err(|e| {
             let kind = e.kind();
             if kind == io::ErrorKind::AlreadyExists {
-                e.context(ErrorKind::LockAlreadyExists(lockfile_path.clone()))
+                Error::lock_already_exists(lockfile_path, e)
             } else {
-                e.context(ErrorKind::CannotAcquireLock(lockfile_path.clone()))
+                Error::cannot_acquire_lock(lockfile_path, e)
             }
         })?;
 

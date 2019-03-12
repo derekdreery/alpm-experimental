@@ -1,10 +1,7 @@
-use std::error;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
-
-use failure::Fail;
 
 use reqwest::Url;
 
@@ -17,7 +14,7 @@ impl fmt::Display for NotADirectory {
     }
 }
 
-impl error::Error for NotADirectory {}
+impl std::error::Error for NotADirectory {}
 
 /// Checks a path is a valid accessible directory.
 ///
@@ -52,7 +49,7 @@ pub enum UrlOrStr {
 }
 
 impl UrlOrStr {
-    pub fn into_url(self) -> Result<Url, (String, impl Fail)> {
+    pub fn into_url(self) -> Result<Url, (String, impl std::error::Error + Send + Sync + 'static)> {
         match self {
             UrlOrStr::Url(url) => Ok(url),
             UrlOrStr::Str(s) => s.parse().map_err(|e| (s, e)),

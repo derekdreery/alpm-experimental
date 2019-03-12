@@ -1,96 +1,77 @@
 //! Errors for serializing the alpm db format
-use std::fmt::{self, Display};
-use std::io;
-use std::result::Result as StdResult;
+use std::{error::Error as StdError, fmt, io, result::Result as StdResult};
 
-use failure::{format_err, Context, Fail};
 use serde::ser;
+
+/// Errors that can occur during serialization.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum ErrorKind {
+    /// Some i/o error occurred.
+    Io,
+    /// This format does not support the given operation
+    Unsupported,
+    /// A Serialize method returned a custom error.
+    Custom,
+}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            ErrorKind::Io => "an i/o error occured",
+            ErrorKind::Unsupported => "tried to serialize an unsupported type/context",
+            ErrorKind::Custom => "the type being serialized reported an error",
+        })
+    }
+}
 
 /// The error type for serialization
 #[derive(Debug)]
 pub struct Error {
-    inner: Context<ErrorKind>,
-}
-
-/// Errors that can occur during serialization.
-#[derive(Debug, Fail, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub enum ErrorKind {
-    /// Some i/o error occurred.
-    #[fail(display = "an i/o error occured")]
-    Io,
-    /// This format does not support the given operation
-    #[fail(display = "tried to serialize an unsupported type/context")]
-    Unsupported,
-    /// A Serialize method returned a custom error.
-    #[fail(display = "the type being serialized reported an error")]
-    Custom,
+    pub kind: ErrorKind,
+    inner: Option<Box<dyn StdError + Sync + Send + 'static>>,
 }
 
 impl Error {
-    /// Get the kind of this error
-    pub fn kind(&self) -> ErrorKind {
-        *self.inner.get_context()
+    fn custom(inner: impl Into<Box<dyn StdError + Send + Sync + 'static>>) -> Self {
+        Error {
+            kind: ErrorKind::Custom,
+            inner: Some(inner.into()),
+        }
     }
-
-    /// Get a version of this error that implements `Fail`.
-    ///
-    /// Unfortunately we cannot implement `Fail` for this type because it conflicts with
-    /// `std::error::Error`, which we must implement for serde.
-    pub fn into_fail(self) -> Context<ErrorKind> {
-        self.inner
+    pub fn source(&self) -> Option<&(dyn StdError + Send + Sync + 'static)> {
+        self.inner.as_ref().map(AsRef::as_ref)
     }
 }
 
-impl ::std::ops::Deref for Error {
-    type Target = Context<ErrorKind>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl Display for Error {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        Display::fmt(&self.inner, f)
+        fmt::Display::fmt(&self.kind, f)
     }
 }
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
-        Error {
-            inner: Context::new(kind),
-        }
+        Error { kind, inner: None }
     }
 }
 
-impl From<Context<ErrorKind>> for Error {
-    fn from(inner: Context<ErrorKind>) -> Error {
-        Error { inner }
-    }
-}
-
-impl ::std::error::Error for Error {
-    fn description(&self) -> &'static str {
-        "unimplemented - use `Display` implementation"
-    }
-
-    fn cause(&self) -> Option<&::std::error::Error> {
-        None
-    }
-}
+impl StdError for Error {}
 
 impl ser::Error for Error {
     fn custom<T>(msg: T) -> Self
     where
-        T: Display,
+        T: fmt::Display,
     {
-        format_err!("{}", msg).context(ErrorKind::Custom).into()
+        Error::custom(msg.to_string())
     }
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
-        err.context(ErrorKind::Io).into()
+        Error {
+            kind: ErrorKind::Io,
+            inner: Some(err.into()),
+        }
     }
 }
 

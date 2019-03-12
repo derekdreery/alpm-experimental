@@ -7,16 +7,17 @@ use std::{
     rc::Weak,
 };
 
-use failure::{format_err, ResultExt};
+use derivative::Derivative;
 use libflate::gzip::Decoder;
 use mtree::{self, Entry, MTree};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::alpm_desc::de;
-use crate::error::{Error, ErrorKind};
-use crate::package::Package;
-use crate::Handle;
-use derivative::Derivative;
+use crate::{
+    alpm_desc::de,
+    error::{Error, ErrorKind},
+    package::Package,
+    Handle,
+};
 
 /// A package from the local database - the database of installed packages.
 #[derive(Debug, Clone, Derivative)]
@@ -42,27 +43,27 @@ impl LocalPackage {
         // get package description
         let desc_raw = fs::read_to_string(path.join("desc"))?;
         let desc: LocalPackageDescription =
-            de::from_str(&desc_raw).context(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
+            de::from_str(&desc_raw).map_err(|err| Error::invalid_local_package(name, err))?;
 
         // check package name/version with path
         if desc.name != name {
-            return Err(format_err!(
-                r#"Name on system ("{}") does not match name in package ("{}")"#,
+            return Err(Error::invalid_local_package(
                 name,
-                desc.name
-            )
-            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))
-            .into());
+                format!(
+                    r#"Name on system ("{}") does not match name in package ("{}")"#,
+                    name, desc.name
+                ),
+            ));
         }
         if desc.version != version {
-            return Err(format_err!(
-                r#"Version on system ("{}") does not match version in \
+            return Err(Error::invalid_local_package(
+                name,
+                format!(
+                    r#"Version on system ("{}") does not match version in \
                        package ("{}")"#,
-                version,
-                desc.version
-            )
-            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))
-            .into());
+                    version, desc.version
+                ),
+            ));
         }
 
         // Get list of files, this is the list of actually installed files, mtree might have some
@@ -72,7 +73,7 @@ impl LocalPackage {
         let files_raw = fs::read_to_string(path.join("files"))?;
         let files: HashSet<Vec<u8>> = de::from_str(&files_raw)
             .map(|f: Files| f.files)
-            .context(ErrorKind::InvalidLocalPackage(name.to_owned()))?
+            .map_err(|err| Error::invalid_local_package(name, err))?
             .into_iter()
             .map(|file| {
                 use std::ffi::OsString;

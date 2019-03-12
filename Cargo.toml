@@ -7,8 +7,6 @@ edition = "2018"
 [dependencies]
 bitflags =  "1"
 chrono = "0.4"
-failure = "0.1"
-failure_derive = "0.1"
 fs2 = "0.4" # we can use this in future for extra locking
 gpgme = "0.7"
 itertools = "0.7"
@@ -23,7 +21,7 @@ tempfile = "3"
 atoi = "0.2"
 tar = "0.4"
 libflate = "0.1"
-mtree = "0.4"
+mtree = "0.5"
 derivative = "1"
 
 [target.'cfg(not(windows))'.dependencies]

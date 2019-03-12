@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 use atoi::atoi;
-use failure::Fail;
 
 use crate::db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME};
 use crate::error::{Error, ErrorKind};
@@ -200,7 +199,7 @@ impl LocalDatabaseInner {
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                 return Ok(DbStatus::Missing);
             }
-            Err(e) => return Err(e.context(ErrorKind::UnexpectedIo).into()),
+            Err(e) => return Err(e.into()),
         };
 
         if !md.is_dir() {

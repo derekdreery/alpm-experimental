@@ -16,11 +16,10 @@ use std::rc::{Rc, Weak as WeakRc};
 use crate::db::{
     Database, DbStatus, DbUsage, SignatureLevel, DEFAULT_SYNC_DB_EXT, LOCAL_DB_NAME, SYNC_DB_DIR,
 };
-use crate::error::{Error, ErrorKind};
+use crate::error::{Error, ErrorContext, ErrorKind};
 use crate::util::UrlOrStr;
 use crate::Handle;
 
-use failure::{Fail, ResultExt};
 use fs2::FileExt;
 use libflate::gzip;
 use reqwest::Url;
@@ -212,10 +211,11 @@ impl SyncDatabaseInner {
     {
         // Convert to url
         let mut url = UrlOrStr::from(url).into_url().map_err(|(s, e)| {
-            e.context(ErrorKind::CannotAddServerToDatabase {
+            Error::from(ErrorKind::CannotAddServerToDatabase {
                 url: format!("{}", s),
                 database: self.name.to_string(),
             })
+            .with_source(e)
         })?;
         // Check last char is a '/', otherwise we'll lose part of it when we add the database name
         match url.path().chars().next_back() {
@@ -247,10 +247,11 @@ impl SyncDatabaseInner {
         UrlOrStr: From<U>,
     {
         let url = UrlOrStr::from(url).into_url().map_err(|(s, e)| {
-            e.context(ErrorKind::CannotAddServerToDatabase {
+            Error::from(ErrorKind::CannotAddServerToDatabase {
                 url: format!("{}", s),
                 database: self.name.to_string(),
             })
+            .with_source(e)
         })?;
         log::debug!(
             r#"removing server with url "{}" from database "{}"."#,

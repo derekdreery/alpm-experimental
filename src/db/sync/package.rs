@@ -1,14 +1,13 @@
-use failure::{format_err, ResultExt};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::alpm_desc::de;
-use crate::error::{Error, ErrorKind};
-use crate::package::Package;
-use derivative::Derivative;
+use crate::{
+    alpm_desc::de,
+    error::{Error, ErrorKind},
+    package::Package,
+};
 
 /// A package from a sync database.
-#[derive(Debug, Clone, Derivative)]
-#[derivative(PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct SyncPackage {
     desc: SyncPackageDescription,
 }
@@ -17,26 +16,26 @@ impl SyncPackage {
     pub(crate) fn from_parts(desc_raw: &str, name: &str, version: &str) -> Result<Self, Error> {
         // get package description
         let desc: SyncPackageDescription =
-            de::from_str(&desc_raw).context(ErrorKind::InvalidSyncPackage(name.to_owned()))?;
+            de::from_str(&desc_raw).map_err(|err| Error::invalid_sync_package(name, err))?;
 
         // check package name/version with path
         if desc.name != name {
-            return Err(format_err!(
-                r#"Name on system ("{}") does not match name in package ("{}")"#,
+            return Err(Error::invalid_sync_package(
                 name,
-                desc.name
-            )
-            .context(ErrorKind::InvalidSyncPackage(name.to_owned()))
-            .into());
+                format!(
+                    r#"Name on system ("{}") does not match name in package ("{}")"#,
+                    name, desc.name
+                ),
+            ));
         }
         if desc.version != version {
-            return Err(format_err!(
-                r#"Version on system ("{}") does not match version in package ("{}")"#,
-                version,
-                desc.version
-            )
-            .context(ErrorKind::InvalidSyncPackage(name.to_owned()))
-            .into());
+            return Err(Error::invalid_sync_package(
+                name,
+                format!(
+                    r#"Version on system ("{}") does not match version in package ("{}")"#,
+                    version, desc.version
+                ),
+            ));
         }
 
         Ok(SyncPackage { desc })
