@@ -7,7 +7,7 @@ mod local;
 mod sync;
 
 pub(crate) use self::local::LocalDatabaseInner;
-pub use self::local::{InstallReason, LocalDatabase, LocalPackage};
+pub use self::local::{InstallReason, LocalDatabase, LocalPackage, ValidationError};
 pub use self::sync::{SyncDatabase, SyncPackage};
 pub(crate) use self::sync::{SyncDatabaseInner, SyncDbName};
 

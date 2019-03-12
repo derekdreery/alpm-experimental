@@ -15,7 +15,7 @@ use crate::error::{Error, ErrorKind};
 use crate::Handle;
 
 mod package;
-pub use self::package::{InstallReason, LocalPackage};
+pub use self::package::{InstallReason, LocalPackage, ValidationError};
 
 const LOCAL_DB_VERSION_FILE: &str = "ALPM_DB_VERSION";
 const LOCAL_DB_CURRENT_VERSION: u64 = 9;

@@ -3,7 +3,6 @@
 #[cfg(not(unix))]
 compile_error!("Only works on unix for now");
 
-
 mod error;
 //mod signing;
 mod util;
@@ -13,8 +12,8 @@ pub mod db;
 mod package;
 
 use crate::db::{
-    LocalDatabase, LocalDatabaseInner, SignatureLevel, SyncDatabase, SyncDatabaseInner,
-    SyncDbName, DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR,
+    LocalDatabase, LocalDatabaseInner, SignatureLevel, SyncDatabase, SyncDatabaseInner, SyncDbName,
+    DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR,
 };
 pub use crate::error::{Error, ErrorKind};
 pub use crate::package::Package;
@@ -26,7 +25,7 @@ use uname::uname;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 /// The name of the lockfile (hard-coded).
@@ -92,7 +91,8 @@ impl Alpm {
     }
 
     pub fn sync_databases<F>(&self, mut f: F)
-        where F: FnMut(SyncDatabase)
+    where
+        F: FnMut(SyncDatabase),
     {
         for (name, db) in self.handle.borrow().sync_databases.iter() {
             f(SyncDatabase::new(db.clone(), name.to_string()));
@@ -205,7 +205,7 @@ struct Handle {
     /// Path to the directory where gpg files are stored
     gpg_path: PathBuf,
     /// List of paths to the cache directories
-    cache_dirs_paths: HashSet<PathBuf>,
+    cache_directories: Vec<PathBuf>,
     /// List of paths to the hook directories
     hook_dirs_paths: HashSet<PathBuf>,
     /// List of paths that may be overwritten
@@ -256,6 +256,10 @@ pub struct AlpmBuilder {
     database_extension: Option<String>,
     /// todo
     gpg_path: Option<PathBuf>,
+    /// A set of locations that we can download packages to.
+    cache_directories: Vec<PathBuf>,
+    /// A set of packages to skip during upgrade.
+    packages_no_upgrade: HashSet<String>,
     /// The architecture to use when installing packages.
     arch: Option<String>,
 }
@@ -267,6 +271,8 @@ impl Default for AlpmBuilder {
             database_path: None,
             database_extension: None,
             gpg_path: None,
+            cache_directories: Vec::new(),
+            packages_no_upgrade: HashSet::new(),
             arch: None,
         }
     }
@@ -274,30 +280,42 @@ impl Default for AlpmBuilder {
 
 impl AlpmBuilder {
     /// Use custom root path.
-    pub fn with_root_path(mut self, root_path: impl AsRef<Path>) -> Self {
-        self.root_path = Some(root_path.as_ref().to_owned());
+    pub fn with_root_path(mut self, root_path: impl Into<PathBuf>) -> Self {
+        self.root_path = Some(root_path.into());
         self
     }
 
     /// Use custom database path
-    pub fn with_database_path(mut self, database_path: impl AsRef<Path>) -> Self {
-        self.database_path = Some(database_path.as_ref().to_owned());
+    pub fn with_database_path(mut self, database_path: impl Into<PathBuf>) -> Self {
+        self.database_path = Some(database_path.into());
         self
     }
 
     /// Use custom database path
-    pub fn with_database_extension(mut self, database_extension: impl AsRef<str>) -> Self {
-        self.database_extension = Some(database_extension.as_ref().to_owned());
+    pub fn with_database_extension(mut self, database_extension: impl Into<String>) -> Self {
+        self.database_extension = Some(database_extension.into());
         self
     }
     /// Use custom gpg location
-    pub fn with_gpg_path(mut self, gpg_path: impl AsRef<Path>) -> Self {
-        self.gpg_path = Some(gpg_path.as_ref().to_owned());
+    pub fn with_gpg_path(mut self, gpg_path: impl Into<PathBuf>) -> Self {
+        self.gpg_path = Some(gpg_path.into());
+        self
+    }
+
+    /// Add a cache directory
+    pub fn with_cache_directory(mut self, cache_directory: impl Into<PathBuf>) -> Self {
+        self.cache_directories.push(cache_directory.into());
+        self
+    }
+
+    /// Mark a package as no-upgrade.
+    pub fn mark_no_upgrade(mut self, no_upgrade: impl Into<String>) -> Self {
+        self.packages_no_upgrade.insert(no_upgrade.into());
         self
     }
 
     /// Build the alpm instance.
-    pub fn build(self) -> Result<Alpm, Error> {
+    pub fn build(mut self) -> Result<Alpm, Error> {
         // todo check that root path is not relative.
         #[cfg(windows)]
         let root_path = self.root_path.unwrap_or("C:\\".into());
@@ -333,10 +351,6 @@ impl AlpmBuilder {
         util::check_valid_directory(&sync_db_path)
             .context(ErrorKind::BadSyncDatabasePath(sync_db_path.clone()))?;
 
-        // todo
-        let gpg_path = root_path.clone();
-        log::debug!("gpg path: {}", gpg_path.display());
-
         let lockfile_path = database_path.join(LOCKFILE);
         log::debug!("lockfile path: {}", lockfile_path.display());
 
@@ -349,8 +363,14 @@ impl AlpmBuilder {
             }
         })?;
 
-        let _arch = root_path.clone();
+        // todo
+        let gpg_path = root_path.clone();
         log::debug!("gpg path: {}", gpg_path.display());
+
+        self.cache_directories.dedup();
+        if self.cache_directories.is_empty() {
+            self.cache_directories.push("/var/cache/pacman/pkg".into());
+        }
 
         // Get architecture of computer
         #[cfg(not(windows))]
@@ -383,10 +403,10 @@ impl AlpmBuilder {
             database_extension,
             lockfile,
             gpg_path,
-            cache_dirs_paths: HashSet::new(),
+            cache_directories: self.cache_directories,
             hook_dirs_paths: HashSet::new(),
             overwrite_file_paths: HashSet::new(),
-            packages_no_upgrade: HashSet::new(),
+            packages_no_upgrade: self.packages_no_upgrade,
             packages_no_extract: HashSet::new(),
             packages_ignore: HashSet::new(),
             groups_ignore: HashSet::new(),

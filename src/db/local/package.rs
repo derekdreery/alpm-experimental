@@ -1,12 +1,13 @@
-use std::cell::RefCell;
-use std::collections::HashSet;
-use std::fmt;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::rc::Weak;
+use std::{
+    cell::RefCell,
+    collections::HashSet,
+    error::Error as StdError,
+    fmt, fs, io,
+    path::{Path, PathBuf},
+    rc::Weak,
+};
 
-use failure::{format_err, Fail, ResultExt};
+use failure::{format_err, ResultExt};
 use libflate::gzip::Decoder;
 use mtree::{self, Entry, MTree};
 use serde_derive::{Deserialize, Serialize};
@@ -163,7 +164,7 @@ impl LocalPackage {
         for file in self.files() {
             let path = root_path.join(file.path());
             // Check
-            let md = match path.metadata() {
+            let md = match path.symlink_metadata() {
                 Ok(md) => md,
                 Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                     errors.push(ValidationError::FileNotFound(format!("{}", path.display())));
@@ -423,32 +424,54 @@ impl From<fs::FileType> for FileType {
 }
 
 /// Possible problems with a package.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum ValidationError {
     /// A file in the package is not present on disk.
-    #[fail(display = "file missing at \"{}\"", _0)]
     FileNotFound(String),
     /// A file is the wrong type
-    #[fail(
-        display = "database says file \"{}\" should be a {}, found a {}",
-        filename, expected, actual
-    )]
     WrongType {
         filename: String,
         expected: FileType,
         actual: FileType,
     },
     /// A file is the wrong size
-    #[fail(
-        display = "database says file \"{}\" should be {} bytes, found {}",
-        filename, expected, actual
-    )]
     WrongSize {
         filename: String,
         expected: u64,
         actual: u64,
     },
 }
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ValidationError::FileNotFound(path) => write!(f, "file missing at \"{}\"", path),
+            ValidationError::WrongType {
+                filename,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "database says file \"{}\" should be a {}, found a {}",
+                filename, expected, actual
+            ),
+            ValidationError::WrongSize {
+                filename,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "database says file \"{}\" should be {} bytes, found {} (a difference of {})",
+                filename,
+                expected,
+                actual,
+                (actual - expected)
+            ),
+        }
+    }
+}
+
+impl StdError for ValidationError {}
 
 impl ValidationError {
     /// Constructor for FileNotFound variant

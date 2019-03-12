@@ -1,4 +1,3 @@
-
 use failure::{format_err, ResultExt};
 use serde_derive::{Deserialize, Serialize};
 

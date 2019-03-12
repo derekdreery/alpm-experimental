@@ -762,17 +762,17 @@ mod nom_parsers {
             _ => false,
         }
     }
-    
+
     named!(pub parse_unsigned(&str) -> &str, recognize!(
         take_while1!(call!(is_digit))
     ));
-    
+
     named!(pub parse_signed(&str) -> &str, recognize!(do_parse!(
         opt!(alt!(tag!("+") | tag!("-"))) >>
         take_while1!(call!(is_digit)) >>
         (())
     )));
-    
+
     named!(pub parse_float(&str) -> &str, recognize!(
         do_parse!(
             opt!(alt!(tag!("+") | tag!("-"))) >>
@@ -822,17 +822,17 @@ mod nom_parsers {
             assert!(!is_digit(*negative));
         }
     }
-    
+
     #[test]
     fn test_parse_unsigned() {
         assert_eq!(parse_unsigned("60 sef"), Ok((" sef", "60")));
     }
-    
+
     #[test]
     fn test_parse_signed() {
         assert_eq!(parse_signed("60 sef"), Ok((" sef", "60")));
     }
-    
+
     #[test]
     fn test_parse_float() {
         assert_eq!(parse_float("60. sef"), Ok((" sef", "60.")));

@@ -1,4 +1,3 @@
-
 /// Information that is available on all packages - regardless of their location.
 pub trait Package {
     /// The package name.

@@ -15,7 +15,7 @@ extern crate log;
 extern crate progress;
 extern crate users;
 
-use alpm::db::Database;
+use alpm::db::{Database, ValidationError};
 use alpm::{Alpm, Error, Package};
 use clap::{App, AppSettings, Arg, ArgMatches};
 use failure::Fail;
@@ -23,7 +23,7 @@ use humansize::{file_size_opts::BINARY, FileSize};
 use log::LevelFilter;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -48,7 +48,7 @@ pub enum Cmd {
         human: bool,
     },
     /// Validate all packages
-    Validate,
+    Validate { ignore_etc: bool },
     /// Search the sync databases for a package with a given name
     Search {
         /// The text to search for
@@ -72,16 +72,12 @@ fn run(opts: Opts) -> Result<(), Error> {
             let mut reported_size = 0;
             let mut size_on_disk = 0;
             let mut idx = 0;
-            let total = local_db.count();
-            let mut bar = progress::Bar::new();
+            let mut bar = PackageProgress::new(local_db.count());
 
             local_db.packages(|pkg| -> Result<(), Error> {
-                let title = format!("Pkg {} of {} ({}) ", idx + 1, total, pkg.name());
-                bar.set_job_title(&shorten_ellipsis(&title, 40));
+                bar.update(pkg.name());
                 reported_size += pkg.size();
                 size_on_disk += pkg.size_on_disk()?;
-                idx += 1;
-                bar.reach_percent(((idx * 100) / total) as i32);
                 // bail early
                 /*
                 if idx > 100 {
@@ -102,12 +98,22 @@ fn run(opts: Opts) -> Result<(), Error> {
                 println!("Actual size: {}", size_on_disk);
             }
         }
-        Cmd::Validate => {
+        Cmd::Validate { ignore_etc } => {
             let local_db = alpm.local_database();
 
-            let mut errors = HashMap::with_capacity(local_db.count());
+            let mut errors: BTreeMap<String, Vec<ValidationError>> = BTreeMap::new();
+            let mut total_errors_cnt = 0;
+            let mut bar = PackageProgress::new(local_db.count());
             local_db.packages(|pkg| -> Result<(), Error> {
-                let pkg_errors = pkg.validate()?;
+                bar.update(pkg.name());
+                let mut pkg_errors = pkg.validate()?;
+                if ignore_etc {
+                    pkg_errors = pkg_errors
+                        .into_iter()
+                        .filter(|err| !starts_with_etc(err))
+                        .collect();
+                }
+
                 if pkg_errors.len() > 0 {
                     errors.insert(pkg.name().to_owned(), pkg_errors);
                 }
@@ -119,16 +125,17 @@ fn run(opts: Opts) -> Result<(), Error> {
                     println!("  {}", err);
                 }
             }
+            println!("Total errors: {}", total_errors_cnt);
         }
         Cmd::Search { name } => {
             alpm.sync_databases(|db| {
-                println!("In database \"{}\"", db.name());
                 db.packages(|pkg| -> Result<(), alpm::Error> {
                     if pkg.name().contains(&name) {
-                        println!("  {}: {}", pkg.name(), pkg.description());
+                        println!("[{}] {}:  {}", db.name(), pkg.name(), pkg.description());
                     }
                     Ok(())
-                }).unwrap();
+                })
+                .unwrap();
             });
         }
     }
@@ -218,7 +225,9 @@ impl Cmd {
             ("disk", Some(sub_m)) => Cmd::DiskUsageReport {
                 human: sub_m.is_present("human"),
             },
-            ("validate", Some(_sub_m)) => Cmd::Validate,
+            ("validate", Some(sub_m)) => Cmd::Validate {
+                ignore_etc: sub_m.is_present("ignore-etc"),
+            },
             ("search", Some(sub_m)) => Cmd::Search {
                 name: sub_m.value_of("name").unwrap().to_owned(),
             },
@@ -252,7 +261,15 @@ fn main() {
                     .help("if present, disk sized will be in human-readable form"),
             ),
         )
-        .subcommand(App::new("validate").about("Check all packages against the local database."))
+        .subcommand(
+            App::new("validate")
+                .arg(
+                    Arg::with_name("ignore-etc")
+                        .long("ignore-etc")
+                        .help("if present, skip files in the `/etc` directory (config files)"),
+                )
+                .about("Check all packages against the local database."),
+        )
         .subcommand(
             App::new("search")
                 .about("Search the sync databases for a package.")
@@ -364,4 +381,65 @@ fn shorten_ellipsis<'a>(input: &'a str, len: usize) -> Cow<'a, str> {
     } else {
         Cow::Borrowed(input)
     }
+}
+
+fn starts_with_etc(err: &ValidationError) -> bool {
+    fn starts_with_etc_inner(input: &str) -> bool {
+        input.starts_with("/etc") || input.starts_with("./etc")
+    }
+    match err {
+        ValidationError::FileNotFound(path) => starts_with_etc_inner(path),
+        ValidationError::WrongType { filename, .. } => starts_with_etc_inner(filename),
+        ValidationError::WrongSize { filename, .. } => starts_with_etc_inner(filename),
+    }
+}
+
+struct PackageProgress {
+    total: usize,
+    state: PackageProgressState,
+    bar: progress::Bar,
+}
+
+impl PackageProgress {
+    /// Create a progress bar with the first package.
+    pub fn new(total: usize) -> Self {
+        PackageProgress {
+            total,
+            state: PackageProgressState::NotStarted,
+            bar: progress::Bar::new(),
+        }
+    }
+
+    /// Move on to the next package.
+    pub fn update(&mut self, next_package: &str) {
+        match self.state {
+            PackageProgressState::NotStarted => {
+                self.state = PackageProgressState::InProgress { position: 0 }
+            }
+            PackageProgressState::InProgress { ref mut position } => {
+                (*position) += 1;
+            }
+        }
+        self.sync(next_package);
+    }
+
+    /// Syncronize the text of the bar with this struct
+    fn sync(&mut self, next_package: &str) {
+        if let PackageProgressState::InProgress { position } = self.state {
+            if position >= self.total {
+                panic!("The total number of packages wasn't big enough");
+            }
+            let title = format!("Pkg {} of {} ({}) ", position + 1, self.total, next_package);
+            self.bar.set_job_title(&shorten_ellipsis(&title, 40));
+            self.bar
+                .reach_percent(((position * 100) / self.total) as i32);
+        } else {
+            panic!("this method must be called once the state is in progress");
+        }
+    }
+}
+
+enum PackageProgressState {
+    NotStarted,
+    InProgress { position: usize },
 }

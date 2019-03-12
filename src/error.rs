@@ -39,7 +39,7 @@ pub enum ErrorKind {
     )]
     BadSyncDatabasePath(PathBuf),
     /// Indicates a general error creating lockfile, for example due to permissions.
-    #[fail(display = "Cannot create the lockfile at \"{:?}\"", _0)]
+    #[fail(display = "Cannot create the lockfile at {:?}", _0)]
     CannotAcquireLock(PathBuf),
     /// Indicates there was a lockfile already present.
     ///

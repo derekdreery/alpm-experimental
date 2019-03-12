@@ -104,17 +104,15 @@ impl Database for SyncDatabase {
         unimplemented!()
     }
 
-    fn package(
-        &self,
-        name: impl AsRef<str>,
-        version: impl AsRef<str>,
-    ) -> Result<Self::Pkg, Error> {
+    fn package(&self, name: impl AsRef<str>, version: impl AsRef<str>) -> Result<Self::Pkg, Error> {
         use crate::package::Package;
 
         let name = name.as_ref();
         let version = version.as_ref();
         let db = self.inner.borrow();
-        let package = db.package_cache.get(&Cow::Borrowed(name))
+        let package = db
+            .package_cache
+            .get(&Cow::Borrowed(name))
             .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
         if version != package.version() {
             return Err(ErrorKind::InvalidLocalPackage(name.to_owned()))?;
@@ -127,8 +125,13 @@ impl Database for SyncDatabase {
         Str: AsRef<str>,
     {
         let name = name.as_ref();
-        let package = self.inner.borrow().package_cache.get(&Cow::Borrowed(name))
-            .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?.clone();
+        let package = self
+            .inner
+            .borrow()
+            .package_cache
+            .get(&Cow::Borrowed(name))
+            .ok_or(ErrorKind::InvalidLocalPackage(name.to_owned()))?
+            .clone();
         Ok(package)
     }
 
