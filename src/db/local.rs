@@ -1,17 +1,22 @@
-use std::borrow::Cow;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::ffi::OsStr;
-use std::fs;
-use std::io::{self, Write};
-use std::path::PathBuf;
-use std::rc::{Rc, Weak};
+use std::{
+    borrow::Cow,
+    cell::RefCell,
+    collections::HashMap,
+    ffi::OsStr,
+    fs,
+    io::{self, Write},
+    path::PathBuf,
+    rc::{Rc, Weak},
+};
 
 use atoi::atoi;
 
-use crate::db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME};
-use crate::error::{Error, ErrorKind};
-use crate::Handle;
+use crate::{
+    db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME},
+    error::{Error, ErrorKind},
+    util::PackageKey,
+    Handle,
+};
 
 mod package;
 pub use self::package::{InstallReason, LocalPackage, ValidationError};
@@ -365,35 +370,6 @@ impl MaybePackage {
                 Ok(pkg)
             }
             MaybePackage::Loaded(pkg) => Ok(pkg.clone()),
-        }
-    }
-}
-
-/// Keys for hashtable of packages.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-struct PackageKey<'a> {
-    /// The package name.
-    name: Cow<'a, str>,
-    /// The package version.
-    version: Cow<'a, str>,
-}
-
-impl<'a> PackageKey<'a> {
-    /// Create a PackageKey from references
-    #[inline]
-    fn from_borrowed(name: &'a str, version: &'a str) -> PackageKey<'a> {
-        PackageKey {
-            name: Cow::Borrowed(name),
-            version: Cow::Borrowed(version),
-        }
-    }
-
-    /// Create a PackageKey from owned values
-    #[inline]
-    fn from_owned(name: String, version: String) -> PackageKey<'static> {
-        PackageKey {
-            name: Cow::Owned(name),
-            version: Cow::Owned(version),
         }
     }
 }

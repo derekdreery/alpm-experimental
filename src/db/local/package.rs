@@ -12,12 +12,7 @@ use libflate::gzip::Decoder;
 use mtree::{self, Entry, MTree};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{
-    alpm_desc::de,
-    error::{Error, ErrorKind},
-    package::Package,
-    Handle,
-};
+use crate::{alpm_desc::de, error::Error, package::Package, Handle};
 
 /// A package from the local database - the database of installed packages.
 #[derive(Debug, Clone, Derivative)]
@@ -82,7 +77,6 @@ impl LocalPackage {
             })
             .collect();
 
-        let _prefix = Path::new("./");
         // get mtree
         let mtree = MTree::from_reader(Decoder::new(io::BufReader::new(fs::File::open(
             path.join("mtree"),

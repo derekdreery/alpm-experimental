@@ -752,7 +752,7 @@ impl<'a, 'de> SeqAccess<'de> for AlpmSeq<'a, 'de> {
 
 /// These have to be in a separate module to avoid a name clash for `ErrorKind`
 mod nom_parsers {
-    use nom::{call, do_parse, tag, take_till1, IResult};
+    use nom::{do_parse, tag, take_till1, IResult};
 
     /*
     /// We need our own is_digit, because nom's version works on u8, not char

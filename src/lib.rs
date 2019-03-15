@@ -1,31 +1,40 @@
 //! A library to manipulate a system managed by the Alpm (Arch Linux Package Manager).
 //!
+//!TODO use signal_hook to handle interrupt etc. and avoid leaving the computer in an unusable
+//!state.
 #[cfg(not(unix))]
 compile_error!("Only works on unix for now");
 
 mod error;
 //mod signing;
 mod util;
+pub mod version;
 
 pub mod alpm_desc;
 pub mod db;
+pub mod mutation;
 mod package;
 
 use crate::db::{
     LocalDatabase, LocalDatabaseInner, SignatureLevel, SyncDatabase, SyncDatabaseInner, SyncDbName,
     DEFAULT_SYNC_DB_EXT, SYNC_DB_DIR,
 };
-pub use crate::error::{Error, ErrorContext, ErrorKind};
-pub use crate::package::Package;
 
 use lockfile::Lockfile;
 use uname::uname;
 
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::io;
-use std::path::PathBuf;
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    io,
+    path::PathBuf,
+    rc::Rc,
+};
+
+pub use crate::{
+    error::{Error, ErrorContext, ErrorKind},
+    package::Package,
+};
 
 /// The name of the lockfile (hard-coded).
 const LOCKFILE: &str = "db.lck";

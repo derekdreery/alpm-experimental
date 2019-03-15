@@ -6,7 +6,6 @@ use std::{error::Error as StdError, fmt, io, path::PathBuf};
 pub enum ErrorKind {
     /// Indicates that the specified root directory is not valid, either because it is
     /// inaccessible, or because it is not a directory.
-    // this would be better displayed using Path::display, but can't do this in procedural macro.
     BadRootPath(PathBuf),
     /// Indicates that the specified database directory is not valid, either because it is
     /// inaccessible, or because it is not a directory.
@@ -100,6 +99,7 @@ pub struct Error {
 }
 
 impl Error {
+    #[inline]
     // some constructors
     fn from_parts(
         kind: ErrorKind,
@@ -137,11 +137,6 @@ impl Error {
         self.inner = Some(inner.into());
         self
     }
-
-    /// Provide our own source method.
-    pub fn source(&self) -> Option<&(dyn StdError + Send + Sync + 'static)> {
-        self.inner.as_ref().map(AsRef::as_ref)
-    }
 }
 
 impl fmt::Display for Error {
@@ -150,7 +145,13 @@ impl fmt::Display for Error {
     }
 }
 
-impl StdError for Error {}
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.inner
+            .as_ref()
+            .map(|i| &**i as &(dyn StdError + 'static))
+    }
+}
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Self {
@@ -160,10 +161,7 @@ impl From<ErrorKind> for Error {
 
 impl From<io::Error> for Error {
     fn from(cause: io::Error) -> Self {
-        Error {
-            kind: ErrorKind::UnexpectedIo,
-            inner: Some(cause.into()),
-        }
+        Error::from_parts(ErrorKind::UnexpectedIo, Some(cause))
     }
 }
 
@@ -171,19 +169,19 @@ impl From<mtree::Error> for Error {
     fn from(from: mtree::Error) -> Error {
         match from {
             mtree::Error::Io(e) => Error::from(e),
-            mtree::Error::Parser(e) => Error {
-                kind: ErrorKind::UnexpectedMtree,
-                inner: Some(e.into()),
-            },
+            mtree::Error::Parser(e) => Error::from_parts(ErrorKind::UnexpectedMtree, Some(e)),
         }
     }
 }
 
+/// Helper trait to help working with `Result<T, Error>` where `Error` is our error.
 pub trait ErrorContext<T, E>
 where
     E: StdError + Send + Sync + 'static,
 {
+    /// Takes any result and makes wraps the error in the given context.
     fn context(self, context: ErrorKind) -> Result<T, Error>;
+    /// Takes any result and makes wraps the error in the context given by the function.
     fn with_context<F>(self, f: F) -> Result<T, Error>
     where
         F: FnOnce(&E) -> ErrorKind;

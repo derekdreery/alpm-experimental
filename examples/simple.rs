@@ -20,11 +20,9 @@ use clap::{App, AppSettings, Arg, ArgMatches};
 use humansize::{file_size_opts::BINARY, FileSize};
 use log::LevelFilter;
 
-use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::{
+    borrow::Cow, collections::BTreeMap, error::Error as StdError, fs, path::Path, process::Command,
+};
 
 const BASE_PATH: &str = "/tmp/alpm-test";
 
@@ -391,7 +389,8 @@ fn starts_with_etc(err: &ValidationError) -> bool {
     }
 }
 
-struct PackageProgress {
+/// A helper to draw a progress bar.
+pub struct PackageProgress {
     total: usize,
     state: PackageProgressState,
     bar: progress::Bar,
@@ -429,7 +428,7 @@ impl PackageProgress {
             let title = format!("Pkg {} of {} ({}) ", position + 1, self.total, next_package);
             self.bar.set_job_title(&shorten_ellipsis(&title, 40));
             self.bar
-                .reach_percent(((position * 100) / self.total) as i32);
+                .reach_percent((((position + 1) * 100) / self.total) as i32);
         } else {
             panic!("this method must be called once the state is in progress");
         }
