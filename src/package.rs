@@ -1,3 +1,6 @@
+use crate::version::Version;
+use std::borrow::Cow;
+
 /// Information that is available on all packages - regardless of their location.
 pub trait Package {
     /// The package name.
@@ -53,4 +56,36 @@ pub trait Package {
 
     /// Which virtual packages this package provides.
     fn provides(&self) -> &[String];
+}
+
+/// Keys for hashtable of packages.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct PackageKey<'a> {
+    /// The package name.
+    pub name: Cow<'a, str>,
+    /// The package version.
+    pub version: Version<'a>,
+}
+
+impl<'a> PackageKey<'a> {
+    /// Create a PackageKey from references
+    #[inline]
+    pub fn from_borrowed(name: &'a str, version: &'a str) -> PackageKey<'a> {
+        PackageKey {
+            name: Cow::Borrowed(name),
+            version: Version::parse(version),
+        }
+    }
+
+    /// Create a PackageKey from owned values.
+    ///
+    /// The version is parsed, so it must copy (otherwise we would lose track of the whole string
+    /// for deallocation).
+    #[inline]
+    pub fn from_owned(name: String, version: impl AsRef<str>) -> PackageKey<'static> {
+        PackageKey {
+            name: Cow::Owned(name),
+            version: Version::parse(version.as_ref()).into_owned(),
+        }
+    }
 }

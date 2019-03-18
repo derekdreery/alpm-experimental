@@ -80,32 +80,3 @@ impl fmt::Display for UrlOrStr {
         }
     }
 }
-
-/// Keys for hashtable of packages.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct PackageKey<'a> {
-    /// The package name.
-    pub name: Cow<'a, str>,
-    /// The package version.
-    pub version: Cow<'a, str>,
-}
-
-impl<'a> PackageKey<'a> {
-    /// Create a PackageKey from references
-    #[inline]
-    pub fn from_borrowed(name: &'a str, version: &'a str) -> PackageKey<'a> {
-        PackageKey {
-            name: Cow::Borrowed(name),
-            version: Cow::Borrowed(version),
-        }
-    }
-
-    /// Create a PackageKey from owned values
-    #[inline]
-    pub fn from_owned(name: String, version: String) -> PackageKey<'static> {
-        PackageKey {
-            name: Cow::Owned(name),
-            version: Cow::Owned(version),
-        }
-    }
-}

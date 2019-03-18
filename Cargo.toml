@@ -9,7 +9,6 @@ bitflags =  "1"
 chrono = "0.4"
 fs2 = "0.4" # we can use this in future for extra locking
 gpgme = "0.7"
-itertools = "0.8.0"
 lazy_static = "1"
 lockfile = "0.2"
 log = "0.4"
@@ -23,6 +22,7 @@ tar = "0.4"
 libflate = "0.1"
 mtree = "0.5"
 derivative = "1"
+itertools = "0.8.0"
 
 [target.'cfg(not(windows))'.dependencies]
 uname = "0.1"

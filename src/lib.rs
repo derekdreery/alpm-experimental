@@ -8,7 +8,7 @@ compile_error!("Only works on unix for now");
 mod error;
 //mod signing;
 mod util;
-pub mod version;
+mod version;
 
 pub mod alpm_desc;
 pub mod db;
@@ -33,7 +33,7 @@ use std::{
 
 pub use crate::{
     error::{Error, ErrorContext, ErrorKind},
-    package::Package,
+    package::{Package, PackageKey},
 };
 
 /// The name of the lockfile (hard-coded).

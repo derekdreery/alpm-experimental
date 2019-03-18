@@ -9,7 +9,7 @@ use bitflags::bitflags;
 
 use std::collections::BTreeSet as Set;
 
-use crate::util::PackageKey;
+use crate::package::PackageKey;
 
 /// This struct holds a plan for a system mutation.
 pub struct MutationPlan {

@@ -14,7 +14,7 @@ use atoi::atoi;
 use crate::{
     db::{Database, DbStatus, DbUsage, SignatureLevel, LOCAL_DB_NAME},
     error::{Error, ErrorKind},
-    util::PackageKey,
+    package::PackageKey,
     Handle,
 };
 
@@ -311,7 +311,7 @@ impl LocalDatabaseInner {
             if self
                 .package_cache
                 .insert(
-                    PackageKey::from_owned(name.to_owned(), version.to_owned()),
+                    PackageKey::from_owned(name.to_owned(), version),
                     RefCell::new(MaybePackage::new(path, name, version)),
                 )
                 .is_some()
