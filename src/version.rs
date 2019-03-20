@@ -12,6 +12,8 @@ const DEFAULT_EPOCH: &'static str = "0";
 ///
 /// It has a custom Ord impl to match version ordering. See the tests to get a feel for how it
 /// works.
+///
+/// The text form is `<epoch>:<version>-<release>` where `<epoch>:` and `-<release>` are optional.
 #[derive(Debug, Clone)]
 pub struct Version<'a> {
     /// The epoch (optional, defaults to "0")
@@ -33,7 +35,7 @@ impl<'a> Version<'a> {
     }
 
     /// Parse a string into a version.
-    // Match wierd algorithms in alpm.
+    // Match algorithm from alpm, which has slightly complicated properties.
     pub fn parse(input: &str) -> Version {
         let mut input_minus_epoch = input;
         // there is an epoch if the version begins with `digit* ':'`
@@ -80,7 +82,7 @@ impl<'a> Version<'a> {
     }
 
     /// Checks for byte equality, you can use this to see if the version is the same, but written
-    /// differently.
+    /// differently (if `a == b`, but `!a.byte_eq(b)`).
     pub fn byte_eq(&self, other: &Self) -> bool {
         self.epoch == other.epoch && self.version == other.version && self.release == other.release
     }
@@ -133,6 +135,7 @@ impl Hash for Version<'_> {
 }
 
 /// Part of the version string
+#[derive(Debug, Eq, PartialEq)]
 enum Block<'a> {
     /// A number of non-alphanumeric characters (length)
     Separator(usize),
@@ -143,6 +146,9 @@ enum Block<'a> {
 }
 
 /// An iterator over input that yields `Block`s.
+///
+/// This is an internal struct that aids implementation of ord and hash.
+#[derive(Debug)]
 struct BlocksIter<'a> {
     rest: &'a [u8],
 }
@@ -181,7 +187,7 @@ impl<'a> Iterator for BlocksIter<'a> {
             }
             // Next block is alpha
             Some(ch) if ch.is_ascii_alphabetic() => {
-                let block = get_block!(self.rest, u8::is_ascii_digit);
+                let block = get_block!(self.rest, u8::is_ascii_alphabetic);
                 Some(Block::Alpha(block))
             }
             // Next block is non-alphanumeric
@@ -305,10 +311,13 @@ fn discard_zeros(input: &[u8]) -> &[u8] {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use std::cmp::Ordering::*;
+    use std::collections::{BTreeSet, HashSet};
 
     #[test]
     fn version_cmp() {
+        // TODO add more cases, or add fuzzing test.
         let test_set = vec![
             (&""[..], &""[..], Equal),
             (&"1"[..], &""[..], Greater),
@@ -317,14 +326,21 @@ mod tests {
             (&"a"[..], &"1"[..], Less),
             (&"1"[..], &"2"[..], Less),
             (&"2"[..], &"1"[..], Greater),
+            // Leading zeros shouldn't affect number comparison
             (&"001"[..], &"2"[..], Less),
             (&"001"[..], &"1"[..], Equal),
+            // Longer separator is newer, but type of separator is ignored.
             (&"aa||123"[..], &"aa^^123"[..], Equal),
-            (&"aa||123"[..], &"aa^^123"[..], Equal),
+            (&"aa|||123"[..], &"aa^^123"[..], Greater),
+            // Extra letters mean older
             (&"1.2.4alpha"[..], &"1.2.4"[..], Less),
             (&"1.2.4-alpha"[..], &"1.2.4"[..], Less),
+            // Extra numbers mean newer
             (&"1.2.4-1"[..], &"1.2.4"[..], Greater),
+            // Trailing separators have no effect.
+            (&"1.2.4"[..], &"1.2.4---"[..], Equal),
             (&"1.2.4--"[..], &"1.2.4---"[..], Equal),
+            // A random more complex example
             (&"123abc%%^%123abc"[..], &"123**$%abc123abc"[..], Less),
         ];
         for (left, right, cmp) in test_set.into_iter() {
@@ -383,7 +399,6 @@ mod tests {
     #[test]
     fn hash() {
         use super::Version;
-        use std::collections::{BTreeSet, HashSet};
         let mut set1 = HashSet::new();
         let mut set2 = BTreeSet::new();
         for val in vec![
@@ -396,7 +411,35 @@ mod tests {
             set1.insert(val.clone());
             set2.insert(val);
         }
+        // Check that there are only 2 unique keys (equivalence class from version).
         assert_eq!(set1.len(), 2, "set1.len()");
         assert_eq!(set2.len(), 2, "set2.len()");
+    }
+
+    #[test]
+    fn blocks_iter() {
+        use super::{Block, BlocksIter};
+        let input = BlocksIter::new(b"abc-123_123--2.46a-alpha");
+        let expected = vec![
+            Block::Alpha(b"abc"),
+            Block::Separator(1),
+            Block::Numeric(b"123"),
+            Block::Separator(1),
+            Block::Numeric(b"123"),
+            Block::Separator(2),
+            Block::Numeric(b"2"),
+            Block::Separator(1),
+            Block::Numeric(b"46"),
+            Block::Alpha(b"a"),
+            Block::Separator(1),
+            Block::Alpha(b"alpha"),
+        ];
+        for pair in input.zip_longest(expected.iter()) {
+            if let itertools::EitherOrBoth::Both(r#in, out) = pair {
+                assert_eq!(r#in, *out);
+            } else {
+                panic!("Expected input and output to be the same length");
+            }
+        }
     }
 }

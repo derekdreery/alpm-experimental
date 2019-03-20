@@ -17,3 +17,5 @@ pub struct MutationPlan {
     packages_to_remove: Set<PackageKey<'static>>,
     packages_to_upgrade: Set<PackageKey<'static>>,
 }
+
+pub fn remove_pkg(name: String) {}

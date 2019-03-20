@@ -64,7 +64,8 @@ impl LocalPackage {
         // Get list of files, this is the list of actually installed files, mtree might have some
         // extra ones we don't need/want.
         // FIXME for now, we use the fact we are on unix to convert paths to byte arrays for faster
-        // comparing.
+        // comparing. It was too slow using std::path::Path. This is something I'd have to fix to
+        // get the lib working on windows.
         let files_raw = fs::read_to_string(path.join("files"))?;
         let files: HashSet<Vec<u8>> = de::from_str(&files_raw)
             .map(|f: Files| f.files)
@@ -94,6 +95,9 @@ impl LocalPackage {
             Err(_) => true,
         })
         .collect::<Result<_, _>>()?;
+
+        // scriptlets
+        // TODO
 
         Ok(LocalPackage {
             path,
